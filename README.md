@@ -15,7 +15,8 @@ Our aim is for these benchmarks to be easily reproducible.
 1. If you are not on campus, connect to the [UT VPN](https://wikis.utexas.edu/display/engritgpublic/Connecting+to+the+University+of+Texas+VPN).
 2. ssh into the machine by running `ssh <yourUsername>@tuxedo.oden.utexas.edu`.
 3. To see available NVIDIA GPUs, run `nvidia-smi`. You should see four Tesla K80s and two GeForce GTX 1080s.
-4. Installing Galois will depend on several modern compilers/libraries. We need to make sure
+4. Installing Galois will depend on several modern compilers/libraries. 
+   We will also need to be able to run cuda and SYCL code. We need to make sure
    the proper modules are loaded by running the following commands:
 
 ```bash
