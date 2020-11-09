@@ -57,13 +57,13 @@ Now make a build directory and build Galois
 BUILD_DIR=$SRC_DIR/build
 mkdir -p $BUILD_DIR
 # The CUDA versions are for a GTX 1080 and a K80
-cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_BUILD_TYPE=Release -DGALOIS_CUDA_CAPABILITY="3.6;6.1"
+cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_BUILD_TYPE=Release -DGALOIS_CUDA_CAPABILITY="3.7;6.1"
 ```
 Note that on our machine, `HUGE_PAGES` is on and libnuma.so is linked.
 
 Next, build the BFS and PR applications
 ```bash
-for application in bfs pr ; do
+for application in bfs pagerank ; do
     make -C $BUILD_DIR/lonestar/analytics/cpu/$application -j
     make -C $BUILD_DIR/lonestar/analytics/gpu/$application -j
 done
