@@ -14,7 +14,7 @@
 parallelism in code. Installation instructions and source code can be found
 on the project [github repo](https://github.com/IntelligentSoftwareSystems/Galois).
 The [Galois documentation](https://iss.oden.utexas.edu/projects/galois/api/current/index.html) has
-a startup guide.
+a [tutorial](https://iss.oden.utexas.edu/projects/galois/api/current/tutorial.html).
 We will be using release 5.0 for comparison.
 
 
