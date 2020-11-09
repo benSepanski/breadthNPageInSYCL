@@ -18,14 +18,14 @@ Our aim is for these benchmarks to be easily reproducible.
 4. Installing Galois will depend on several modern compilers/libraries. We need to make sure
    the proper modules are loaded by running the following commands:
 
-        ```bash
-        module use /org/centers/cdgc/modules # Make sure we can see all the modules we will need:
-        module use /net/faraday/workspace/local/modules/modulefiles # Make sure we can see all the modules we will need:
-        # Now get the right versions needed for Galois
-        module load c7 gcc/8.1 cmake/3.10.2 boost/1.67.0 llvm/10.0 fmt/6.2.1
-        # Get version of cuda and get computeCpp SYCL compiler
-        module load cuda/10.2 compute-cpp/2.2.1
-        ```
+```bash
+module use /org/centers/cdgc/modules # Make sure we can see all the modules we will need:
+module use /net/faraday/workspace/local/modules/modulefiles # Make sure we can see all the modules we will need:
+# Now get the right versions needed for Galois
+module load c7 gcc/8.1 cmake/3.10.2 boost/1.67.0 llvm/10.0 fmt/6.2.1
+# Get version of cuda and get computeCpp SYCL compiler
+module load cuda/10.2 compute-cpp/2.2.1
+```
 
 ### Galois
 
