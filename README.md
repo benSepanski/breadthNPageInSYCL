@@ -8,7 +8,7 @@ We will also compare them with the [Lonestar 4.0](https://iss.oden.utexas.edu/?p
 implementations of BFS and PR.
 Our aim is for these benchmarks to be easily reproducible.
 
-## Setup
+## Tuxedo Setup
 
 ### Connecting to Tuxedo
 
