@@ -38,6 +38,7 @@ a [tutorial](https://iss.oden.utexas.edu/projects/galois/api/current/tutorial.ht
 We will be using release 6.0 for comparison.
 
 It also contains the [Lonestar Project](https://iss.oden.utexas.edu/?p=projects/galois/lonestar)
+(and [LonestarGPU](https://iss.oden.utexas.edu/?p=projects/galois/lonestargpu))
 from which we obtain competing implementations of BFS and PR.
 To install Lonestar we will follow the instructions from the Galois repository
 to install the BFS and PR implementations from release 6.0:
