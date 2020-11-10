@@ -6,9 +6,11 @@ as links from which they can be downloaded.
 `GALOIS_BUILD_DIR` to the top directory of
 your Galois build.
 
-* Run `make download-edgelists` to download the edge lists
+* Run `make download-edgelists` to run all the following targets
+    - `make download-example-arcs-edgelists` downloads a graph with around 100 edges from [[2]](#2)
 
-* Run `make convert-edgelists` to convert all downloaded edge lists into graphs
+* Run `make convert-edgelists` to convert all downloaded edge lists into graphs (skipping
+  any which have already been converted).
 
 * Run `make clean` to run all the following targets
     - `make clean-edgelists` removes the directory of 

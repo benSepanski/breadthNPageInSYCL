@@ -1,6 +1,18 @@
-# must be in this directory
+# must a subdirectory of this directory
 DOWNLOADED_EDGE_LISTS=downloadedEdgeLists
 
+############################################ CLEANING TARGETS ##########
+clean: clean-edgelists clean-graphs 
+
+clean-edgelists:  # remove all downloaded graphs
+	@echo "***Removing downloads" ; \
+	rm -rf $(DOWNLOADED_EDGE_LISTS) ;
+
+clean-graphs:  # remove all *.gr files
+	@echo "***Removing *.gr files" ; \
+	rm *.gr ;
+
+############################################ CONVERSION TO *.gr ##########
 convert-edgelists: 
 	@echo "***Converting edge lists" ; \
 	for edgeList in $(DOWNLOADED_EDGE_LISTS)/* ; do \
@@ -15,21 +27,9 @@ convert-edgelists:
 		fi ; \
 	done 
 
-download-edgelists:  # re-download all graphs
-	@echo "***Downloading edge lists" ; \
-	mkdir -p $(DOWNLOADED_EDGE_LISTS) ; \
-	for edgeListURL in `cat edgeListURLs.txt` ; do \
-		cd $(DOWNLOADED_EDGE_LISTS) ; \
-		curl -O $$edgeListURL ; \
-		cd .. ; \
-	done 
+############################################ DOWNLOADS ##########
+download-edgelists: download-example-arcs-edgelist
 
-clean: clean-edgelists clean-graphs 
-
-clean-edgelists:  # remove all downloaded graphs
-	@echo "***Removing downloads" ; \
-	rm -rf $(DOWNLOADED_EDGE_LISTS) ;
-
-clean-graphs:  # remove all *.gr files
-	@echo "***Removing *.gr files" ; \
-	rm *.gr ;
+download-example-arcs-edgelist: 
+	cd $(DOWNLOADED_EDGE_LISTS) ; \
+	curl -O http://webdatacommons.org/hyperlinkgraph/data/example_arcs ; 
