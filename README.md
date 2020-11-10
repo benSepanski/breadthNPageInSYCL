@@ -11,7 +11,7 @@ Our aim is for these benchmarks to be easily reproducible.
 ## Graphs Used for Benchmarking
 
 * We use the following graphs from section 5.1 of [[1]](#1)
-    - Web
+    - Web data commons hyperlink graph `wdc12` [[2]](#2), [[3]](#3)
 
 ## Tuxedo Setup
 
@@ -86,3 +86,7 @@ There are instructions for running the executables on the github:
 #  References
 
 <a id="1">[1]</a> Roshan Dathathri, Gurbinder Gill, Loc Hoang, Hoang-Vu Dang, Alex Brooks, Nikoli Dryden, Marc Snir, Keshav Pingali, [Gluon: a communication-optimizing substrate for distributed heterogeneous graph analytics.](https://dl.acm.org/doi/10.1145/3192366.3192404) PLDI 2018: 752-768,
+
+<a id="2">[2]</a> Robert Meusel, Sebastiano Vigna, Oliver Lehmberg, and Christian Bizer. 2012. Web Data Commons - Hyperlink Graphs. http://webdatacommons.org/hyperlinkgraph/
+
+<a id="3">[3]</a> Robert Meusel, Sebastiano Vigna, Oliver Lehmberg, and Christian Bizer. 2014. Graph Structure in the Web — Revisited: A Trick of the Heavy Tail. In Proceedings of the 23rd International Conference on World Wide Web (WWW ’14 Companion). ACM, New York, NY, USA, 427-432. https://doi.org/10.1145/2567948.2576928
