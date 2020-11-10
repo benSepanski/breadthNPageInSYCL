@@ -8,6 +8,11 @@ We will also compare them with the [Lonestar](https://iss.oden.utexas.edu/?p=pro
 implementations of BFS and PR.
 Our aim is for these benchmarks to be easily reproducible.
 
+## Graphs Used for Benchmarking
+
+* We use the following graphs from section 5.1 of [[1]](#1)
+    - Web
+
 ## Tuxedo Setup
 
 ### Connecting to Tuxedo
@@ -77,3 +82,7 @@ There are instructions for running the executables on the github:
 * [bfs gpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu/bfs)
 * [pagerank cpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/cpu/pagerank)
 * [pagerank gpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu/pagerank)
+
+#  References
+
+<a id="1">[1]</1> [Roshan Dathathri, Gurbinder Gill, Loc Hoang, Hoang-Vu Dang, Alex Brooks, Nikoli Dryden, Marc Snir, Keshav Pingali, Gluon: a communication-optimizing substrate for distributed heterogeneous graph analytics. PLDI 2018: 752-768](https://dl.acm.org/doi/10.1145/3192366.3192404),
