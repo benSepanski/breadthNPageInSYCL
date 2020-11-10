@@ -1,12 +1,17 @@
 This directory will store the `.gr` files, as well
 as links from which they can be downloaded.
 
-You must have the environment variable
-`GALOIS_BUILD_DIR` set to the top directory of
+
+* Set the environment variable
+`GALOIS_BUILD_DIR` to the top directory of
 your Galois build.
 
-Run
-```
-make download-graphs
-```
-to download the graphs.
+* Run `make download-edgelists` to download the edge lists
+
+* Run `make convert-edgelists` to convert all downloaded edge lists into graphs
+
+* Run `make clean` to run all the following targets
+    - `make clean-edgelists` removes the directory of 
+      downloaded edge lists and all its contents
+    - `make clean-graphs` removes all `*.gr` files in this directory
+
