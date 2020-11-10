@@ -64,6 +64,8 @@ BUILD_DIR=$SRC_DIR/build
 mkdir -p $BUILD_DIR
 # The CUDA versions are for a GTX 1080 and a K80
 cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_BUILD_TYPE=Release -DGALOIS_CUDA_CAPABILITY="3.7;6.1"
+# Build graph conversion capabilities
+make graph-convert
 ```
 Note that on our machine, `HUGE_PAGES` is on and libnuma.so is linked.
 
