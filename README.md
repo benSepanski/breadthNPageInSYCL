@@ -85,4 +85,4 @@ There are instructions for running the executables on the github:
 
 #  References
 
-<a id="1">[1]</1> [Roshan Dathathri, Gurbinder Gill, Loc Hoang, Hoang-Vu Dang, Alex Brooks, Nikoli Dryden, Marc Snir, Keshav Pingali, Gluon: a communication-optimizing substrate for distributed heterogeneous graph analytics. PLDI 2018: 752-768](https://dl.acm.org/doi/10.1145/3192366.3192404),
+<a id="1">[1]</a> [Roshan Dathathri, Gurbinder Gill, Loc Hoang, Hoang-Vu Dang, Alex Brooks, Nikoli Dryden, Marc Snir, Keshav Pingali, Gluon: a communication-optimizing substrate for distributed heterogeneous graph analytics. PLDI 2018: 752-768](https://dl.acm.org/doi/10.1145/3192366.3192404),
