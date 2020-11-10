@@ -1,5 +1,9 @@
 # breadthNPageInSYCL
 
+TODO: SET UP SCRIPT TO RUN THE LONESTAR APPLICATIONS ON GRAPHS
+
+TODO: MAKE SURE SCRIPT RECORDS METRICS OF INTEREST (TIMING, KERNEL THROUGHPUT, ETC.)
+
 The goal of this repository is to provide several implementations
 of breadth-first-search (BFS) and PageRank (PR),
 then benchmark them on the provided machines
