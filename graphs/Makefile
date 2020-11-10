@@ -28,8 +28,28 @@ convert-edgelists:
 	done 
 
 ############################################ DOWNLOADS ##########
-download-edgelists: download-example-arcs-edgelist
+make-downloaded-edge-list-dir:
+	@mkdir -p $(DOWNLOADED_EDGE_LISTS)
 
-download-example-arcs-edgelist: 
+download-edgelists: \
+    download-example-arcs-edgelist \
+    download-wdc12-edgelist
+
+download-example-arcs-edgelist: make-downloaded-edge-list-dir
+	@echo "*** Downloading example_arcs from webdatacommons.org" ; \
+	echo ; \
 	cd $(DOWNLOADED_EDGE_LISTS) ; \
-	curl -O http://webdatacommons.org/hyperlinkgraph/data/example_arcs ; 
+	curl -O http://webdatacommons.org/hyperlinkgraph/data/example_arcs ; \
+	cd .. ; \
+	echo ; \
+	echo ;
+
+# This is around 331 GB!!!
+download-wdc12-edgelist: make-downloaded-edge-list-dir
+	@echo "*** Downloading wdc12 from webdatacommons.org... this is over 330GB" ; \
+	echo ; \
+	cd $(DOWNLOADED_EDGE_LISTS) ; \
+	wget -i http://webdatacommons.org/hyperlinkgraph/2012-08/data/arc.list.txt ; \
+	cd .. ; \
+	echo ; \
+	echo 
