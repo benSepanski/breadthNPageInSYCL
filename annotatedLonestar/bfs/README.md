@@ -316,6 +316,8 @@ __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 
 
   bfs_kernel_dev(graph, LEVEL, enable_lb, in_wl, out_wl);
 }
+```
+```Cuda
 void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim3& blocks, dim3& threads)
 {
   while (pipe.in_wl().nitems())
@@ -343,9 +345,6 @@ void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim
   }
 }
 ```
-
-## More Utility
-
 ```Cuda
 __global__ void __launch_bounds__(__tb_gg_main_pipe_1_gpu_gb) gg_main_pipe_1_gpu_gb(CSRGraph gg, int LEVEL, PipeContextT<Worklist2> pipe, int* cl_LEVEL, bool enable_lb, GlobalBarrier gb)
 {
@@ -396,6 +395,8 @@ void gg_main_pipe_1_wrapper(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& p
     check_cuda(cudaFree(cl_LEVEL));
   }
 }
+```
+```Cuda
 void gg_main(CSRGraph& hg, CSRGraph& gg)
 {
   dim3 blocks, threads;
