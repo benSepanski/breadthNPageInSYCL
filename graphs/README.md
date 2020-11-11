@@ -19,7 +19,7 @@ We will use the [krongen](https://github.com/snap-stanford/snap/tree/master/exam
 and [graphgen](https://github.com/snap-stanford/snap/tree/master/examples/graphgen)
 portions of SNAP to generate R-MAT and Kronecker graphs.
 For ease of installation, we will use [SNAP.py](https://snap.stanford.edu/snappy/#setup).
-Since we are on CentOS and using Python 2, here are instructions that for installation:
+Since we are on CentOS and using Python 2, here are instructions for installation:
 ```bash
 cd ~
 curl -O https://snap.stanford.edu/snappy/release/snap-stanford-5.0.0-5.0-centos6.5-x64-py2.6.tar.gz
