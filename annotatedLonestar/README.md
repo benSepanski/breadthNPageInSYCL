@@ -15,3 +15,6 @@ which shows the `main()` function used, as well
 as how command line arguments are parsed.
 This explains the `gg_main()` function which you see in
 `bfs.cu` and `pagerank.cu`.
+One should note that the first CSR argument to `gg_main()` is
+the graph on the host, and the second CSR argument
+to `gg_main()` is the graph on the device.

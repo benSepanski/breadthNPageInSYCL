@@ -4,6 +4,11 @@
 
 The ThreadWork struct comes from ["thread\_work.h"](https://github.com/IntelligentSoftwareSystems/Galois/blob/master/libgpu/include/thread_work.h)
 in [libgpu](https://github.com/IntelligentSoftwareSystems/Galois/blob/master/libgpu/).
+The [Worklist2 struct](https://github.com/IntelligentSoftwareSystems/Galois/blob/357f258718682ee2058ccf0d57557a124345ece9/libgpu/include/worklist.h)
+also comes from libgpu.
+
+`start_node` comes from the ["support.cu"](https://github.com/IntelligentSoftwareSystems/Galois/blob/master/lonestar/analytics/gpu/bfs/support.cu)
+for bfs.
 
 ```Cuda
 /*  -*- mode: c++ -*-  */
@@ -28,6 +33,8 @@ static const int __tb_gg_main_pipe_1_gpu_gb = 256;
 
 ## BFS Initialization
 
+Set `node_data` of source to `0` and all others to `INF`.
+
 ```Cuda
 __global__ void bfs_init(CSRGraph graph, int src)
 {
@@ -43,7 +50,7 @@ __global__ void bfs_init(CSRGraph graph, int src)
 }
 ```
 
-## Load balanced BFS
+## Load-balanced BFS
 
 ```Cuda
 __global__ void bfs_kernel_dev_TB_LB(CSRGraph graph, int LEVEL, int * thread_prefix_work_wl, unsigned int num_items, PipeContextT<Worklist2> thread_src_wl, Worklist2 in_wl, Worklist2 out_wl)
