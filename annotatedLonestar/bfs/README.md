@@ -1,6 +1,7 @@
 # Lonestar CUDA implementation of BFS
 
-```
+
+```Cuda
 /*  -*- mode: c++ -*-  */
 #include "gg.h"
 #include "ggcuda.h"
@@ -19,6 +20,11 @@ typedef int node_data_type;
 extern const node_data_type INF = INT_MAX;
 static const int __tb_bfs_kernel = TB_SIZE;
 static const int __tb_gg_main_pipe_1_gpu_gb = 256;
+```
+
+## BFS kernels
+
+```Cuda
 __global__ void bfs_init(CSRGraph graph, int src)
 {
   unsigned tid = TID_1D;
