@@ -1,5 +1,9 @@
 # Lonestar CUDA implementation of BFS
 
+Lonestar documentation [here](https://iss.oden.utexas.edu/?p=projects/galois/analytics/gpu-bfs),
+a little more documenation [here](https://iss.oden.utexas.edu/?p=projects/galois/analytics/gpu-bfs).
+Optimizations are described in the [IrGL paper](https://dl.acm.org/doi/10.1145/3022671.2984015)
+
 ## Imports and constants
 
 The ThreadWork struct comes from ["thread\_work.h"](https://github.com/IntelligentSoftwareSystems/Galois/blob/master/libgpu/include/thread_work.h)
