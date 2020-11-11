@@ -14,6 +14,7 @@ Our aim is for these benchmarks to be easily reproducible.
 
 ## Directory structure
 
+* `bfs` contains the SYCL implementation of BFS
 * `bench` contains instructions for benchmarking the
   implementations
 * `annotatedLonestar` provides annotations on the Lonestar GPU
