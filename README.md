@@ -16,6 +16,8 @@ Our aim is for these benchmarks to be easily reproducible.
 
 * `graphs` contains instructions for obtaining the graphs
   used for benchmarking.
+* `annotatedLonestar` contains annotated descriptions of the Lonestar GPU
+  implemenations of BFS and PR
 
 ## Tuxedo Setup
 
