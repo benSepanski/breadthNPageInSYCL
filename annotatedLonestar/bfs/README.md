@@ -146,7 +146,7 @@ __global__ void Inspect_bfs_kernel_dev(CSRGraph graph, int LEVEL, PipeContextT<W
 }
 ```
 
-## ???
+## BFS without load-balancing
 
 ```CUDA
 __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
@@ -304,7 +304,7 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
 }
 ```
 
-## BFS without load balancing.
+## Utility
 
 ```Cuda
 __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
@@ -344,7 +344,7 @@ void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim
 }
 ```
 
-## Utility
+## More Utility
 
 ```Cuda
 __global__ void __launch_bounds__(__tb_gg_main_pipe_1_gpu_gb) gg_main_pipe_1_gpu_gb(CSRGraph gg, int LEVEL, PipeContextT<Worklist2> pipe, int* cl_LEVEL, bool enable_lb, GlobalBarrier gb)
