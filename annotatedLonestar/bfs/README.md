@@ -1,5 +1,9 @@
 # Lonestar CUDA implementation of BFS
 
+## Imports and constants
+
+The ThreadWork struct comes from ["thread\_work.h"](https://github.com/IntelligentSoftwareSystems/Galois/blob/master/libgpu/include/thread_work.h)
+in [libgpu](https://github.com/IntelligentSoftwareSystems/Galois/blob/master/libgpu/).
 
 ```Cuda
 /*  -*- mode: c++ -*-  */
@@ -22,7 +26,7 @@ static const int __tb_bfs_kernel = TB_SIZE;
 static const int __tb_gg_main_pipe_1_gpu_gb = 256;
 ```
 
-## BFS kernels
+## BFS Initialization
 
 ```Cuda
 __global__ void bfs_init(CSRGraph graph, int src)
@@ -37,6 +41,11 @@ __global__ void bfs_init(CSRGraph graph, int src)
     graph.node_data[node] = (node == src) ? 0 : INF ;
   }
 }
+```
+
+## Load balanced BFS
+
+```Cuda
 __global__ void bfs_kernel_dev_TB_LB(CSRGraph graph, int LEVEL, int * thread_prefix_work_wl, unsigned int num_items, PipeContextT<Worklist2> thread_src_wl, Worklist2 in_wl, Worklist2 out_wl)
 {
   unsigned tid = TID_1D;
@@ -101,6 +110,9 @@ __global__ void bfs_kernel_dev_TB_LB(CSRGraph graph, int LEVEL, int * thread_pre
     }
   }
 }
+```
+
+```Cuda
 __global__ void Inspect_bfs_kernel_dev(CSRGraph graph, int LEVEL, PipeContextT<Worklist2> thread_work_wl, PipeContextT<Worklist2> thread_src_wl, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
 {
   unsigned tid = TID_1D;
@@ -276,6 +288,11 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
     }
   }
 }
+```
+
+## BFS without load balancing.
+
+```Cuda
 __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
 {
   unsigned tid = TID_1D;
@@ -311,6 +328,11 @@ void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim
     LEVEL++;
   }
 }
+```
+
+## Utility
+
+```Cuda
 __global__ void __launch_bounds__(__tb_gg_main_pipe_1_gpu_gb) gg_main_pipe_1_gpu_gb(CSRGraph gg, int LEVEL, PipeContextT<Worklist2> pipe, int* cl_LEVEL, bool enable_lb, GlobalBarrier gb)
 {
   unsigned tid = TID_1D;
@@ -332,6 +354,11 @@ __global__ void __launch_bounds__(__tb_gg_main_pipe_1_gpu_gb) gg_main_pipe_1_gpu
     *cl_LEVEL = LEVEL;
   }
 }
+```
+
+## gg_main
+
+```Cuda
 void gg_main_pipe_1_wrapper(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim3& blocks, dim3& threads)
 {
   static GlobalBarrierLifetime gg_main_pipe_1_gpu_gb_barrier;
