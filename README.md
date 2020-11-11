@@ -14,10 +14,10 @@ Our aim is for these benchmarks to be easily reproducible.
 
 ## Directory structure
 
-* `graphs` contains instructions for obtaining the graphs
-  used for benchmarking.
-* `annotatedLonestar` contains annotated descriptions of the Lonestar GPU
-  implemenations of BFS and PR
+* `bench` contains instructions for benchmarking the
+  implementations
+* `annotatedLonestar` provides annotations on the Lonestar GPU
+  implemenations of BFS and PR for quick reference
 
 ## Tuxedo Setup
 
