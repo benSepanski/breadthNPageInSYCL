@@ -119,6 +119,8 @@ __global__ void bfs_kernel_dev_TB_LB(CSRGraph graph, int LEVEL, int * thread_pre
 }
 ```
 
+## ???
+
 ```Cuda
 __global__ void Inspect_bfs_kernel_dev(CSRGraph graph, int LEVEL, PipeContextT<Worklist2> thread_work_wl, PipeContextT<Worklist2> thread_src_wl, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
 {
@@ -142,6 +144,11 @@ __global__ void Inspect_bfs_kernel_dev(CSRGraph graph, int LEVEL, PipeContextT<W
     }
   }
 }
+```
+
+## ???
+
+```CUDA
 __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
 {
   unsigned tid = TID_1D;
