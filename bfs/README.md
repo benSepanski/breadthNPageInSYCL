@@ -1,8 +1,8 @@
 # BFS in SYCL
 
-TODO : Set up CMakeLists to automate compilation
+TODO : Make sure Cmake works
 
-To compile `helloWorld.cpp`, run 
+To compile, run 
 ```bash
 compute++ -sycl -sycl-target ptx64 --gcc-toolchain=/opt/apps/ossw/applications/gcc/gcc-8.1/c7 -c helloWorld.cpp
 ```
