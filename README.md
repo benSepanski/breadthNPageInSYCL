@@ -20,6 +20,36 @@ Our aim is for these benchmarks to be easily reproducible.
 * `annotatedLonestar` provides annotations on the Lonestar GPU
   implemenations of BFS and PR for quick reference
 
+## Installation
+
+This section describes how to build our SYCL implementations of
+bfs and pagerank.
+
+If you are using the Tuxedo machine, go through [Tuxedo Setup](#tuxedo-setup)
+first. Even if you are not using the Tuxedo machine, it may be worth
+looking at the [Connecting to Tuxedo](#connecting-to-tuxedo) portion
+to see the versions of packages we are using.
+
+Assuming the source directory (i.e. where this `README.md` file is located)
+is in `$SOURCE_DIR` and you want to build into directory `$BUILD_DIR`, run
+```bash
+mkdir -p $BUILD_DIR
+cmake -S $SOURCE_DIR -B $BUILD_DIR # <CMAKE OPTIONS HERE>
+```
+The cmake options are set up for the configuration of the Tuxedo machine
+described in [Tuxedo Setup](#tuxedo-setup). You can look in `CMakeLists.txt`
+to see the Tuxedo defaults for these options:
+* `ComputeCpp_DIR` The directory of your `ComputeCpp` build
+* `OpenCL_INCLUDE_DIR` A directory holding the OpenCL headers.
+  Look at the environment variable `$OpenCL_INCLUDE_DIR` to
+  see what this should be.
+  Make sure to set the environment variable `cl_TARGET_OPENCL_VERSION`
+  based on your OpenCL version.
+  Assuming the environment variable `$OpenCL_LIBRARY` is set,
+  you can find the OpenCL version by looking at `$OpenCL_LIBRARY/pkgconfig/OpenCL.pc`
+  For Tuxedo, set the environment variable `cl_TARGET_OPENCL_VERSION=300`
+  (version 3.0).
+
 ## Tuxedo Setup
 
 ### Connecting to Tuxedo
