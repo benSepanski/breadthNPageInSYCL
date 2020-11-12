@@ -22,3 +22,4 @@ include_directories(${COMPUTECPP_INCLUDE_DIRECTORY})
 
 ### Subdirectories to make
 add_subdirectory(bfs)
+add_subdirectory(pagerank)

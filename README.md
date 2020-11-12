@@ -4,6 +4,10 @@ TODO: SET UP SCRIPT TO RUN THE LONESTAR APPLICATIONS ON GRAPHS
 
 TODO: MAKE SURE SCRIPT RECORDS METRICS OF INTEREST (TIMING, KERNEL THROUGHPUT, ETC.)
 
+TODO: WRITE SAMPLE SYCL BFS AND PAGERANK (RIGHT NOW THEY"RE HELLO WORLDS)
+
+TODO: WRITE CORRECTNESS CHECK FOR BFS AND PAGERANK (MAKE SURE OUTPUT MATCHES GALOIS)
+
 The goal of this repository is to provide several implementations
 of breadth-first-search (BFS) and PageRank (PR),
 then benchmark them on the provided machines
@@ -46,12 +50,6 @@ to see the Tuxedo defaults for these options:
 * `OpenCL_INCLUDE_DIR` A directory holding the OpenCL headers.
   Look at the environment variable `$OpenCL_INCLUDE_DIR` to
   see what this should be.
-  Make sure to set the environment variable `cl_TARGET_OPENCL_VERSION`
-  based on your OpenCL version.
-  Assuming the environment variable `$OpenCL_LIBRARY` is set,
-  you can find the OpenCL version by looking at `$OpenCL_LIBRARY/pkgconfig/OpenCL.pc`
-  For Tuxedo, set the environment variable `cl_TARGET_OPENCL_VERSION=300`
-  (version 3.0).
 * `COMPUTECPP_USER_FLAGS` We use this to specify the gcc version to use.
   Note that our setup doesn't actually require this to be set
   since we called `module load gcc/8.1`, but we leave the option here
@@ -59,6 +57,19 @@ to see the Tuxedo defaults for these options:
 * `COMPUTECPP_BITCODE` We set this to `"ptx64"` to tell SYCL
   to target NVIDIA machines as described
   [here](https://developer.codeplay.com/products/computecpp/ce/guides/platform-support/targeting-nvidia-ptx).
+
+Go to [bfs](https://github.com/benSepanski/breadthNPageInSYCL/tree/main/bfs)
+or [pagerank](https://github.com/benSepanski/breadthNPageInSYCL/tree/main/pagerank)
+directories for instructions on building the individual applications.
+
+One note: To avoid an annoying error message when you build the applications,
+make sure to set the environment variable `CL_TARGET_OPENCL_VERSION`
+based on your OpenCL version.
+Assuming the environment variable `$OpenCL_LIBRARY` is set,
+you can find the OpenCL version by looking at `$OpenCL_LIBRARY/pkgconfig/OpenCL.pc`
+For Tuxedo, set the environment variable `CL_TARGET_OPENCL_VERSION=300`
+(version 3.0). This environment variable must be set before
+you do any of the `module load`s described in [Connecting to Tuxedo](#connecting-to-tuxedo).
 
 ## Tuxedo Setup
 
