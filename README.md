@@ -49,6 +49,13 @@ to see the Tuxedo defaults for these options:
   you can find the OpenCL version by looking at `$OpenCL_LIBRARY/pkgconfig/OpenCL.pc`
   For Tuxedo, set the environment variable `cl_TARGET_OPENCL_VERSION=300`
   (version 3.0).
+* `COMPUTECPP_USER_FLAGS` We use this to specify the gcc version to use.
+  Note that our setup doesn't actually require this to be set
+  since we called `module load gcc/8.1`, but we leave the option here
+  for completeness.
+* `COMPUTECPP_BITCODE` We set this to `"ptx64"` to tell SYCL
+  to target NVIDIA machines as described
+  [here](https://developer.codeplay.com/products/computecpp/ce/guides/platform-support/targeting-nvidia-ptx).
 
 ## Tuxedo Setup
 
