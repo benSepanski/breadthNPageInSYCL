@@ -34,9 +34,12 @@ Assuming the source directory (i.e. where this `README.md` file is located)
 is in `$SOURCE_DIR` and you want to build into directory `$BUILD_DIR`, run
 ```bash
 mkdir -p $BUILD_DIR
-cmake -S $SOURCE_DIR -B $BUILD_DIR # <CMAKE OPTIONS HERE>
+cmake -S $SOURCE_DIR -B $BUILD_DIR # <CMAKE OPTIONS HERE> 
+                                   # -DComputeCpp_DIR=...
+                                   # -DOpenCL_INCLUDE_DIR=...
+                                   # <etcetera>
 ```
-The cmake options are set up for the configuration of the Tuxedo machine
+The default cmake options are set up for the configuration of the Tuxedo machine
 described in [Tuxedo Setup](#tuxedo-setup). You can look in `CMakeLists.txt`
 to see the Tuxedo defaults for these options:
 * `ComputeCpp_DIR` The directory of your `ComputeCpp` build
