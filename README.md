@@ -48,20 +48,21 @@ You'll need to load these modules every time you log onto the machine.
 
 ### Installation & Lonestar Setup
 
-[Galois](https://iss.oden.utexas.edu/?p=projects/galois) is a project which exploits irregular
-parallelism in code. 
-We have Galois as a submodule. If you are interested in installing it separately,
-installation instructions and source code can be found
-on the project [github repo](https://github.com/IntelligentSoftwareSystems/Galois).
+We will install [Galois](https://iss.oden.utexas.edu/?p=projects/galois)
+as a submodule.
+
+Galois is a project which exploits irregular parallelism in code. 
+The [github repo](https://github.com/IntelligentSoftwareSystems/Galois) holds the source code.
 The [Galois documentation](https://iss.oden.utexas.edu/projects/galois/api/current/index.html) has
 a [tutorial](https://iss.oden.utexas.edu/projects/galois/api/current/tutorial.html).
 We will be using release 6.0 for comparison.
-
-It also contains the [Lonestar Project](https://iss.oden.utexas.edu/?p=projects/galois/lonestar)
+Galois also contains the [Lonestar Project](https://iss.oden.utexas.edu/?p=projects/galois/lonestar)
 (and [LonestarGPU](https://iss.oden.utexas.edu/?p=projects/galois/lonestargpu))
 from which we obtain competing implementations of BFS and PR.
 To install Lonestar we will follow the instructions from the Galois repository
 to install the BFS and PR implementations from release 6.0.
+
+Here are instructions to install Galois as a submodule
 ```bash
 # Run this in the root directory of breadthNPageInSYCL
 git submodule init
