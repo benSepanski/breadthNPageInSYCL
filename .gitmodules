@@ -1,0 +1,3 @@
+[submodule "Galois"]
+	path = Galois
+	url = https://github.com/IntelligentSoftwareSystems/Galois
