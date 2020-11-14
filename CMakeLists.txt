@@ -4,6 +4,7 @@
 project(breadthNPageInSYCL)
 
 cmake_minimum_required(VERSION 3.4.3)
+set(CMAKE_CXX_STANDARD 17)
 
 ####### Options (alt set as -DName=Value)
 set( ComputeCpp_DIR "/org/centers/cdgc/ComputeCpp/ComputeCpp-CE-2.2.1-x86_64-linux-gnu/" )
@@ -13,6 +14,33 @@ set( OpenCL_INCLUDE_DIR "/org/centers/cdgc/ComputeCpp/OpenCL-Headers" )
 set( COMPUTECPP_USER_FLAGS "--gcc-toolchain=/opt/apps/ossw/applications/gcc/gcc-8.1/c7" )
 
 set( COMPUTECPP_BITCODE "ptx64" )
+
+set( GALOIS_CUDA_CAPABILITY "3.7;6.1" )
+
+####### Submodule setup from https://cliutils.gitlab.io/modern-cmake/chapters/projects/submodule.html
+#######
+#######  Convenient for Galois submodule
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+# Update submodules as needed
+    option(GIT_SUBMODULE "Check submodules during build" ON)
+    if(GIT_SUBMODULE)
+        message(STATUS "Submodule update")
+        execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                        RESULT_VARIABLE GIT_SUBMOD_RESULT)
+        if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+            message(FATAL_ERROR "git submodule update --init failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
+        endif()
+    endif()
+endif()
+
+if(NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/Galois/CMakeLists.txt")
+    message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
+endif()
+
+####### Galois setup, we want to build it all since we need LonestarGPU apps
+add_subdirectory(Galois)
 
 ####### ComputeCPP setup
 set(CMAKE_MODULE_PATH "/org/centers/cdgc/ComputeCpp/ComputeCpp/cmake/Modules")

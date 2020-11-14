@@ -79,18 +79,23 @@ mkdir -p build/
 # The CUDA versions are for a GTX 1080 and a K80
 cmake -S . -B build/ -DCMAKE_BUILD_TYPE=Release -DGALOIS_CUDA_CAPABILITY="3.7;6.1"
 ```
+Assuming the root directory of `breadthNPageInSYCL` is in `$SOURCE_DIR`,
+the source directory of Galois is in `$SOURCE_DIR/Galois`, and the
+build directory of Galois is in `$SOURCE_DIR/Galois/build`.
+
 Note that on tuxedo, `HUGE_PAGES` is on and libnuma.so is linked.
 
-Next, build the BFS and PR applications
+Next, build the BFS and PR applications by running
+the following code in the Galois build directory
 ```bash
-# Run this in <rootDir of breadthNPageInSYCL>/Galois
+# Run this in the $SOURCE_DIR/Galois/build
 for application in bfs pagerank ; do
-    make -C build/lonestar/analytics/cpu/$application -j
-    make -C build/lonestar/analytics/gpu/$application -j
+    make -C lonestar/analytics/cpu/$application -j
+    make -C lonestar/analytics/gpu/$application -j
 done
 ```
 Now the bfs cpu
-executable is the file `Galois/build/lonestar/analytics/cpu/bfs/bfs-cpu`, etc.
+executable is the file `$SOURCE_DIR/Galois/build/lonestar/analytics/cpu/bfs/bfs-cpu`, etc.
 
 There are instructions for running the executables on the github:
 * [bfs cpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/cpu/bfs)
@@ -127,6 +132,8 @@ to see the Tuxedo defaults for these options:
 * `COMPUTECPP_BITCODE` We set this to `"ptx64"` to tell SYCL
   to target NVIDIA machines as described
   [here](https://developer.codeplay.com/products/computecpp/ce/guides/platform-support/targeting-nvidia-ptx).
+* `GALOIS_CUDA_CAPABILITY` default is "3.7;6.1", this is used when
+  building LonestarGPU as described [here](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu)
 
 Go to [bfs](https://github.com/benSepanski/breadthNPageInSYCL/tree/main/bfs)
 or [pagerank](https://github.com/benSepanski/breadthNPageInSYCL/tree/main/pagerank)
