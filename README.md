@@ -36,20 +36,25 @@ Our aim is for these benchmarks to be easily reproducible.
 ```bash
 module use /org/centers/cdgc/modules # Make sure we can see all the modules we will need:
 module use /net/faraday/workspace/local/modules/modulefiles # Make sure we can see all the modules we will need:
-# Now get the right versions needed for Galois
-module load c7 gcc/8.1 cmake/3.17.0 boost/1.71 llvm/10.0 fmt/6.2.1 mpich2/3.2
 # Get version of cuda and get computeCpp SYCL compiler
 module load cuda/10.2 compute-cpp/2.2.1
+# Now get the right versions needed for Galois
+module load c7 gcc/8.1 cmake/3.17.0 boost/1.71 llvm/10.0 fmt/6.2.1 mpich2/3.2
 # useful so that git doesn't yell at you
 module load git/2.14.2
 ```
 You'll need to load these modules every time you log onto the machine.
 
+NOTE: It's important to load `gcc/8.1` after `compute-cpp/2.2.1`,
+      otherwise the gcc path will get messed up (and may mess up
+      the make process).
 
 ## Installation
 
 This section describes how to build our SYCL implementations of
 bfs and pagerank.
+
+You may need to 
 
 Assuming the source directory (i.e. where this `README.md` file is located)
 is in `$SOURCE_DIR` and you want to build into directory `$BUILD_DIR`
