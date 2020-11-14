@@ -65,6 +65,10 @@ Modify the following CMake variables as necessary for your machine:
    [here](https://developer.codeplay.com/products/computecpp/ce/guides/platform-support/targeting-nvidia-ptx).
 * `CMAKE_C_COMPILER` the c compiler to use
 * `CMAKE_CXX_COMPILER` the c++ compiler to use
+* `CL_TARGET_OPENCL_VERSION` is a 3-digit number representing the OpenCL version
+  (e.g. 300 represents 3.0.0).
+  Assuming the environment variable `$OpenCL_LIBRARY` is set,
+  you can find the OpenCL version by looking at `$OpenCL_LIBRARY/pkgconfig/OpenCL.pc`
 * `GALOIS_CUDA_CAPABILITY` Cuda capability used in Galois build.
   For tuxedo this is "3.7;6.1". This is used when
   building LonestarGPU as described [here](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu)
@@ -82,18 +86,10 @@ cmake -S $SOURCE_DIR -B $BUILD_DIR \
     -DCOMPUTECPP_BITCODE="ptx64" \
     -DCMAKE_C_COMPILER=`which gcc` \
     -DCMAKE_CXX_COMPILER=`which g++` \
+    -DCL_TARGET_OPENCL_VERSION=300 \
     -DGALOIS_CUDA_CAPABILITY="3.7;6.1" \
     -DCMAKE_BUILD_TYPE="Release"
 ```
-
-One note: To avoid an annoying error message when you build the applications,
-make sure to set the environment variable `CL_TARGET_OPENCL_VERSION`
-based on your OpenCL version.
-Assuming the environment variable `$OpenCL_LIBRARY` is set,
-you can find the OpenCL version by looking at `$OpenCL_LIBRARY/pkgconfig/OpenCL.pc`
-For Tuxedo, set the environment variable `CL_TARGET_OPENCL_VERSION=300`
-(version 3.0). This environment variable must be set before
-you do any of the `module load`s described in [Connecting to Tuxedo](#tuxedo-setup).
 
 ### Galois / Lonestar
 

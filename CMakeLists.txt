@@ -38,5 +38,6 @@ include_directories(${COMPUTECPP_INCLUDE_DIRECTORY})
 ### Build Galois since we need LonestarGPU apps
 add_subdirectory(extern/Galois EXCLUDE_FROM_ALL)
 ### Other subdirectories to make
+add_compile_definitions(CL_TARGET_OPENCL_VERSION=300)
 add_subdirectory(bfs)
 add_subdirectory(pagerank)
