@@ -45,26 +45,23 @@ module load git/2.14.2
 ```
 You'll need to load these modules every time you log onto the machine.
 
-NOTE: It's important to load `gcc/8.1` after `compute-cpp/2.2.1`,
-      otherwise the gcc path will get messed up (and may mess up
-      the make process).
-
 ## Installation
 
 This section describes how to build our SYCL implementations of
 bfs and pagerank.
 
-You may need to 
+Note that we have to explicitly set the C and CXX compilers
+since the default CMake files used by ComputeCpp
+find the incorrect gcc on tuxedo (which messes up the build process).
 
 Assuming the source directory (i.e. where this `README.md` file is located)
 is in `$SOURCE_DIR` and you want to build into directory `$BUILD_DIR`
 (The Galois build directory will be `$BUILD_DIR/extern/Galois`), run
 ```bash
 mkdir -p $BUILD_DIR
-cmake -S $SOURCE_DIR -B $BUILD_DIR # <CMAKE OPTIONS HERE> 
-                                   # -DComputeCpp_DIR=...
-                                   # -DOpenCL_INCLUDE_DIR=...
-                                   # <etcetera>
+cmake -S $SOURCE_DIR -B $BUILD_DIR \
+    -DCMAKE_C_COMPILER=`which gcc` \
+    -DCMAKE_CXX_COMPILER=`which g++`
 ```
 The default cmake options are set up for the configuration of the Tuxedo machine
 described in [Tuxedo Setup](#tuxedo-setup). You can look in `CMakeLists.txt`
