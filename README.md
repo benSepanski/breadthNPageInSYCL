@@ -95,8 +95,9 @@ you do any of the `module load`s described in [Connecting to Tuxedo](#tuxedo-set
 
 ### Galois / Lonestar
 
-We will install [Galois](https://iss.oden.utexas.edu/?p=projects/galois)
-as a submodule during cmake.
+We installed [Galois](https://iss.oden.utexas.edu/?p=projects/galois)
+as a submodule during cmake (source is in `$SOURCE_DIR/extern/GALOIS`,
+build is in `$BUILD_DIR/extern/Galois`).
 
 Galois is a project which exploits irregular parallelism in code. 
 The [github repo](https://github.com/IntelligentSoftwareSystems/Galois) holds the source code.
@@ -126,5 +127,3 @@ There are instructions for running the executables on the github:
 * [bfs gpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu/bfs)
 * [pagerank cpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/cpu/pagerank)
 * [pagerank gpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu/pagerank)
-
-
