@@ -46,42 +46,6 @@ module load git/2.14.2
 You'll need to load these modules every time you log onto the machine.
 
 
-### Installation & Lonestar Setup
-
-We will install [Galois](https://iss.oden.utexas.edu/?p=projects/galois)
-as a submodule during cmake.
-
-Galois is a project which exploits irregular parallelism in code. 
-The [github repo](https://github.com/IntelligentSoftwareSystems/Galois) holds the source code.
-The [Galois documentation](https://iss.oden.utexas.edu/projects/galois/api/current/index.html) has
-a [tutorial](https://iss.oden.utexas.edu/projects/galois/api/current/tutorial.html).
-We will be using release 6.0 for comparison.
-Galois also contains the [Lonestar Project](https://iss.oden.utexas.edu/?p=projects/galois/lonestar)
-(and [LonestarGPU](https://iss.oden.utexas.edu/?p=projects/galois/lonestargpu))
-from which we obtain competing implementations of BFS and PR.
-
-Note that on tuxedo, `HUGE_PAGES` is on and libnuma.so is linked.
-
-You can build the BFS and PR applications by running
-the following code in the Galois build directory (see [installation instructions](#installation)
-for the directory))
-```bash
-# Run this in the Galois build directory.
-for application in bfs pagerank ; do
-    make -C lonestar/analytics/cpu/$application -j
-    make -C lonestar/analytics/gpu/$application -j
-done
-```
-Now the bfs cpu is in the `/lonestar/analytics/cpu/bfs/` directory of the
-Galois build directory, etc.
-
-There are instructions for running the executables on the github:
-* [bfs cpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/cpu/bfs)
-* [bfs gpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu/bfs)
-* [pagerank cpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/cpu/pagerank)
-* [pagerank gpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu/pagerank)
-
-
 ## Installation
 
 This section describes how to build our SYCL implementations of
@@ -128,3 +92,39 @@ you can find the OpenCL version by looking at `$OpenCL_LIBRARY/pkgconfig/OpenCL.
 For Tuxedo, set the environment variable `CL_TARGET_OPENCL_VERSION=300`
 (version 3.0). This environment variable must be set before
 you do any of the `module load`s described in [Connecting to Tuxedo](#tuxedo-setup).
+
+### Galois / Lonestar
+
+We will install [Galois](https://iss.oden.utexas.edu/?p=projects/galois)
+as a submodule during cmake.
+
+Galois is a project which exploits irregular parallelism in code. 
+The [github repo](https://github.com/IntelligentSoftwareSystems/Galois) holds the source code.
+The [Galois documentation](https://iss.oden.utexas.edu/projects/galois/api/current/index.html) has
+a [tutorial](https://iss.oden.utexas.edu/projects/galois/api/current/tutorial.html).
+We will be using release 6.0 for comparison.
+Galois also contains the [Lonestar Project](https://iss.oden.utexas.edu/?p=projects/galois/lonestar)
+(and [LonestarGPU](https://iss.oden.utexas.edu/?p=projects/galois/lonestargpu))
+from which we obtain competing implementations of BFS and PR.
+
+Note that on tuxedo, `HUGE_PAGES` is on and libnuma.so is linked.
+
+You can build the BFS and PR applications by running
+the following code in the Galois build directory
+(`$BUILD_DIR/extern/Galois`, as described in [installation instructions](#installation))
+```bash
+# Run this in the Galois build directory.
+for application in bfs pagerank ; do
+    make -C $BUILD_DIR/extern/Galois/lonestar/analytics/cpu/$application -j
+    make -C $BUILD_DIR/extern/Galois/lonestar/analytics/gpu/$application -j
+done
+```
+Now the bfs cpu is in the `$BUILD_DIR/extern/Galois/lonestar/analytics/cpu/bfs/` directory.
+
+There are instructions for running the executables on the github:
+* [bfs cpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/cpu/bfs)
+* [bfs gpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu/bfs)
+* [pagerank cpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/cpu/pagerank)
+* [pagerank gpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu/pagerank)
+
+
