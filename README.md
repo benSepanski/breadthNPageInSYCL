@@ -50,6 +50,17 @@ You'll need to load these modules every time you log onto the machine.
 This section describes how to build our SYCL implementations of
 bfs and pagerank.
 
+First clone this repository, set `$SOURCE_DIR`
+to the root directory of the repository, and set
+`$BUILD_DIR` to whichever directory you want to build
+the project in.
+```
+git clone https://github.com/benSepanski/breadthNPageInSYCL
+cd breadthNPageInSYCL
+SOURCE_DIR=`pwd`
+BUILD_DIR=$SOURCE_DIR/build  # or wherever you want
+```
+
 We have to explicitly set several options.
 The sample code below has the correct values for the Tuxedo machine
 (when set up as described in [Tuxedo Setup](#tuxedo-setup)).
