@@ -6,20 +6,6 @@ project(breadthNPageInSYCL)
 cmake_minimum_required(VERSION 3.4.3)
 set(CMAKE_CXX_STANDARD 17)
 
-####### Options (alt set as -DName=Value)
-set( ComputeCpp_DIR "/org/centers/cdgc/ComputeCpp/ComputeCpp-CE-2.2.1-x86_64-linux-gnu/" )
-
-set( OpenCL_INCLUDE_DIR "/org/centers/cdgc/ComputeCpp/OpenCL-Headers" )
-
-set( COMPUTECPP_USER_FLAGS "--gcc-toolchain=/opt/apps/ossw/applications/gcc/gcc-8.1/c7" )
-
-set( COMPUTECPP_BITCODE "ptx64" )
-
-# Galois options
-set( GALOIS_CUDA_CAPABILITY "3.7;6.1" )
-set( CMAKE_BUILD_TYPE "Release" )
-#set( CMAKE_BUILD_TYPE "Debug" )
-
 ####### Submodule setup from https://cliutils.gitlab.io/modern-cmake/chapters/projects/submodule.html
 #######
 #######  Convenient for Galois submodule

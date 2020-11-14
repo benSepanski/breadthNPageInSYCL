@@ -50,9 +50,25 @@ You'll need to load these modules every time you log onto the machine.
 This section describes how to build our SYCL implementations of
 bfs and pagerank.
 
-Note that we have to explicitly set the C and CXX compilers
-since the default CMake files used by ComputeCpp
-find the incorrect gcc on tuxedo (which messes up the build process).
+We have to explicitly set several options.
+The sample code below has the correct values for the Tuxedo machine
+(when set up as described in [Tuxedo Setup](#tuxedo-setup)).
+Modify the following CMake variables as necessary for your machine:
+
+* `ComputeCpp_DIR` The directory of your `ComputeCpp` build
+* `OpenCL_INCLUDE_DIR` A directory holding the OpenCL headers.
+  Look at the environment variable `$OpenCL_INCLUDE_DIR` to
+  see what this should be.
+* `COMPUTECPP_USER_FLAGS` Used to specify the gcc version for ComputeCpp to use.
+* `COMPUTECPP_BITCODE` Specifies the bitcode for ComputeCpp to target.
+   `"ptx64"` for NVIDIA as described
+   [here](https://developer.codeplay.com/products/computecpp/ce/guides/platform-support/targeting-nvidia-ptx).
+* `CMAKE_C_COMPILER` the c compiler to use
+* `CMAKE_CXX_COMPILER` the c++ compiler to use
+* `GALOIS_CUDA_CAPABILITY` Cuda capability used in Galois build.
+  For tuxedo this is "3.7;6.1". This is used when
+  building LonestarGPU as described [here](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu)
+* `CMAKE_BUILD_TYPE` `"Release"` or `"Debug"`.
 
 Assuming the source directory (i.e. where this `README.md` file is located)
 is in `$SOURCE_DIR` and you want to build into directory `$BUILD_DIR`
@@ -60,31 +76,15 @@ is in `$SOURCE_DIR` and you want to build into directory `$BUILD_DIR`
 ```bash
 mkdir -p $BUILD_DIR
 cmake -S $SOURCE_DIR -B $BUILD_DIR \
+    -DComputeCpp_DIR="/org/centers/cdgc/ComputeCpp/ComputeCpp-CE-2.2.1-x86_64-linux-gnu/" \
+    -DOpenCL_INCLUDE_DIR="/org/centers/cdgc/ComputeCpp/OpenCL-Headers" \
+    -DCOMPUTECPP_USER_FLAGS="--gcc-toolchain=/opt/apps/ossw/applications/gcc/gcc-8.1/c7" \
+    -DCOMPUTECPP_BITCODE="ptx64" \
     -DCMAKE_C_COMPILER=`which gcc` \
-    -DCMAKE_CXX_COMPILER=`which g++`
+    -DCMAKE_CXX_COMPILER=`which g++` \
+    -DGALOIS_CUDA_CAPABILITY="3.7;6.1" \
+    -DCMAKE_BUILD_TYPE="Release"
 ```
-The default cmake options are set up for the configuration of the Tuxedo machine
-described in [Tuxedo Setup](#tuxedo-setup). You can look in `CMakeLists.txt`
-to see the Tuxedo defaults for these options:
-* `ComputeCpp_DIR` The directory of your `ComputeCpp` build
-* `OpenCL_INCLUDE_DIR` A directory holding the OpenCL headers.
-  Look at the environment variable `$OpenCL_INCLUDE_DIR` to
-  see what this should be.
-* `COMPUTECPP_USER_FLAGS` We use this to specify the gcc version to use.
-  Note that our setup doesn't actually require this to be set
-  since we called `module load gcc/8.1`, but we leave the option here
-  for completeness.
-* `COMPUTECPP_BITCODE` We set this to `"ptx64"` to tell SYCL
-  to target NVIDIA machines as described
-  [here](https://developer.codeplay.com/products/computecpp/ce/guides/platform-support/targeting-nvidia-ptx).
-* `GALOIS_CUDA_CAPABILITY` default is "3.7;6.1", this is used when
-  building LonestarGPU as described [here](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu)
-* `CMAKE_BUILD_TYPE` default is `"Release"`, this is used
-  when building Galois. You could build `"Debug"` instead.
-
-Go to [bfs](https://github.com/benSepanski/breadthNPageInSYCL/tree/main/bfs)
-or [pagerank](https://github.com/benSepanski/breadthNPageInSYCL/tree/main/pagerank)
-directories for instructions on building the individual applications.
 
 One note: To avoid an annoying error message when you build the applications,
 make sure to set the environment variable `CL_TARGET_OPENCL_VERSION`
