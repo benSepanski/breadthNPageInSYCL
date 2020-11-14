@@ -1,8 +1,6 @@
 #include <iostream>
 #include <CL/sycl.hpp>
 
-#include "galois/Galois.h"
-
 class vector_addition;
 
 int main(int, char**) {
