@@ -15,7 +15,10 @@ set( COMPUTECPP_USER_FLAGS "--gcc-toolchain=/opt/apps/ossw/applications/gcc/gcc-
 
 set( COMPUTECPP_BITCODE "ptx64" )
 
+# Galois options
 set( GALOIS_CUDA_CAPABILITY "3.7;6.1" )
+set( CMAKE_BUILD_TYPE "Release" )
+#set( CMAKE_BUILD_TYPE "Debug" )
 
 ####### Submodule setup from https://cliutils.gitlab.io/modern-cmake/chapters/projects/submodule.html
 #######
@@ -40,7 +43,7 @@ if(NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/Galois/CMakeLists.txt")
 endif()
 
 ####### Galois setup, we want to build it all since we need LonestarGPU apps
-add_subdirectory(Galois)
+add_subdirectory(extern/Galois)
 
 ####### ComputeCPP setup
 set(CMAKE_MODULE_PATH "/org/centers/cdgc/ComputeCpp/ComputeCpp/cmake/Modules")

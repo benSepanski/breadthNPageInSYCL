@@ -49,7 +49,7 @@ You'll need to load these modules every time you log onto the machine.
 ### Installation & Lonestar Setup
 
 We will install [Galois](https://iss.oden.utexas.edu/?p=projects/galois)
-as a submodule.
+as a submodule during cmake.
 
 Galois is a project which exploits irregular parallelism in code. 
 The [github repo](https://github.com/IntelligentSoftwareSystems/Galois) holds the source code.
@@ -59,43 +59,21 @@ We will be using release 6.0 for comparison.
 Galois also contains the [Lonestar Project](https://iss.oden.utexas.edu/?p=projects/galois/lonestar)
 (and [LonestarGPU](https://iss.oden.utexas.edu/?p=projects/galois/lonestargpu))
 from which we obtain competing implementations of BFS and PR.
-To install Lonestar we will follow the instructions from the Galois repository
-to install the BFS and PR implementations from release 6.0.
-
-Here are instructions to install Galois as a submodule
-```bash
-# Run this in the root directory of breadthNPageInSYCL
-git submodule init
-git submodule update
-```
-For the Lonestar [GPU benchmarks](https://github.com/IntelligentSoftwareSystems/Galois),
-we need some extra dependencies
-```bash
-# Run this in the root directory of breadthNPageInSYCL
-cd Galois/
-git submodule init
-git submodule update
-mkdir -p build/
-# The CUDA versions are for a GTX 1080 and a K80
-cmake -S . -B build/ -DCMAKE_BUILD_TYPE=Release -DGALOIS_CUDA_CAPABILITY="3.7;6.1"
-```
-Assuming the root directory of `breadthNPageInSYCL` is in `$SOURCE_DIR`,
-the source directory of Galois is in `$SOURCE_DIR/Galois`, and the
-build directory of Galois is in `$SOURCE_DIR/Galois/build`.
 
 Note that on tuxedo, `HUGE_PAGES` is on and libnuma.so is linked.
 
-Next, build the BFS and PR applications by running
-the following code in the Galois build directory
+You can build the BFS and PR applications by running
+the following code in the Galois build directory (see [installation instructions](#installation)
+for the directory))
 ```bash
-# Run this in the $SOURCE_DIR/Galois/build
+# Run this in the Galois build directory.
 for application in bfs pagerank ; do
     make -C lonestar/analytics/cpu/$application -j
     make -C lonestar/analytics/gpu/$application -j
 done
 ```
-Now the bfs cpu
-executable is the file `$SOURCE_DIR/Galois/build/lonestar/analytics/cpu/bfs/bfs-cpu`, etc.
+Now the bfs cpu is in the `/lonestar/analytics/cpu/bfs/` directory of the
+Galois build directory, etc.
 
 There are instructions for running the executables on the github:
 * [bfs cpu](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/cpu/bfs)
@@ -110,7 +88,8 @@ This section describes how to build our SYCL implementations of
 bfs and pagerank.
 
 Assuming the source directory (i.e. where this `README.md` file is located)
-is in `$SOURCE_DIR` and you want to build into directory `$BUILD_DIR`, run
+is in `$SOURCE_DIR` and you want to build into directory `$BUILD_DIR`
+(The Galois build directory will be `$BUILD_DIR/extern/Galois`), run
 ```bash
 mkdir -p $BUILD_DIR
 cmake -S $SOURCE_DIR -B $BUILD_DIR # <CMAKE OPTIONS HERE> 
@@ -134,6 +113,8 @@ to see the Tuxedo defaults for these options:
   [here](https://developer.codeplay.com/products/computecpp/ce/guides/platform-support/targeting-nvidia-ptx).
 * `GALOIS_CUDA_CAPABILITY` default is "3.7;6.1", this is used when
   building LonestarGPU as described [here](https://github.com/IntelligentSoftwareSystems/Galois/tree/master/lonestar/analytics/gpu)
+* `CMAKE_BUILD_TYPE` default is `"Release"`, this is used
+  when building Galois. You could build `"Debug"` instead.
 
 Go to [bfs](https://github.com/benSepanski/breadthNPageInSYCL/tree/main/bfs)
 or [pagerank](https://github.com/benSepanski/breadthNPageInSYCL/tree/main/pagerank)
