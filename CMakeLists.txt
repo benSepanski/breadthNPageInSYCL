@@ -42,8 +42,6 @@ if(NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/Galois/CMakeLists.txt")
     message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
 endif()
 
-####### Galois setup, we want to build it all since we need LonestarGPU apps
-add_subdirectory(extern/Galois)
 
 ####### ComputeCPP setup
 set(CMAKE_MODULE_PATH "/org/centers/cdgc/ComputeCpp/ComputeCpp/cmake/Modules")
@@ -51,6 +49,8 @@ include(FindComputeCpp)
 
 include_directories(${COMPUTECPP_INCLUDE_DIRECTORY})
 
-### Subdirectories to make
+### Build Galois since we need LonestarGPU apps
+add_subdirectory(extern/Galois EXCLUDE_FROM_ALL)
+### Other subdirectories to make
 add_subdirectory(bfs)
 add_subdirectory(pagerank)
