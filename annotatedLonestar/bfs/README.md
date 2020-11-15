@@ -4,6 +4,8 @@ Lonestar documentation [here](https://iss.oden.utexas.edu/?p=projects/galois/ana
 a little more documenation [here](https://iss.oden.utexas.edu/?p=projects/galois/analytics/gpu-bfs).
 Optimizations are described in the [IrGL paper](https://dl.acm.org/doi/10.1145/3022671.2984015)
 
+You should really read this file from the bottom up.
+
 ## Imports and constants
 
 The ThreadWork struct comes from ["thread\_work.h"](https://github.com/IntelligentSoftwareSystems/Galois/blob/master/libgpu/include/thread_work.h)
@@ -124,6 +126,15 @@ __global__ void bfs_kernel_dev_TB_LB(CSRGraph graph, int LEVEL, int * thread_pre
 ```
 
 ## Inspection Kernel
+
+* `DEGREE_LIMIT` is defined [here](https://github.com/IntelligentSoftwareSystems/Galois/blob/158b572802864bedc2db6b6d3c37d1fdd5035886/libgpu/include/ggcuda.h)
+  in `libgpu`
+* `thread_<...>_wl.in_wl()` is a [worklist](https://github.com/IntelligentSoftwareSystems/Galois/blob/2a2e5656d739c6228c996ce2f952ec65216aa22f/libgpu/include/worklist.h)
+* For each node (with index `wlnode` in the worklist) associated to this thread
+    - `pop_id` stores the thread node-id in `node`
+    - `pop` is true if `node` is a valid node and its degree is too bg
+    - If `pop` is true, puts the node on `thread_src_wl` and its
+      degree on `thread_work_wl`
 
 ```Cuda
 __global__ void Inspect_bfs_kernel_dev(CSRGraph graph, int LEVEL, PipeContextT<Worklist2> thread_work_wl, PipeContextT<Worklist2> thread_src_wl, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
@@ -321,8 +332,6 @@ __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 
   bfs_kernel_dev(graph, LEVEL, enable_lb, in_wl, out_wl);
 }
 ```
-
-This kernel runs until the waitlist is empty.
 
 ## Load Balancing BFS Dispatcher
 
