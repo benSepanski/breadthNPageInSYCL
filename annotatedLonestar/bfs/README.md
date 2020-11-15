@@ -54,7 +54,7 @@ __global__ void bfs_init(CSRGraph graph, int src)
 }
 ```
 
-## Load-balanced BFS
+## BFS Load-balancer
 
 ```Cuda
 __global__ void bfs_kernel_dev_TB_LB(CSRGraph graph, int LEVEL, int * thread_prefix_work_wl, unsigned int num_items, PipeContextT<Worklist2> thread_src_wl, Worklist2 in_wl, Worklist2 out_wl)
@@ -123,7 +123,7 @@ __global__ void bfs_kernel_dev_TB_LB(CSRGraph graph, int LEVEL, int * thread_pre
 }
 ```
 
-## ???
+## Inspection Kernel
 
 ```Cuda
 __global__ void Inspect_bfs_kernel_dev(CSRGraph graph, int LEVEL, PipeContextT<Worklist2> thread_work_wl, PipeContextT<Worklist2> thread_src_wl, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
@@ -150,7 +150,7 @@ __global__ void Inspect_bfs_kernel_dev(CSRGraph graph, int LEVEL, PipeContextT<W
 }
 ```
 
-## BFS without load-balancing
+## BFS Kernel
 
 ```CUDA
 __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
@@ -308,7 +308,7 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
 }
 ```
 
-## Call each BFS level
+## Call BFS after waitlist reset
 
 ```Cuda
 __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
@@ -325,6 +325,18 @@ __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 
 This kernel runs until the waitlist is empty.
 
 ## Load Balancing BFS Dispatcher
+
+* While there are items in the pipeline:
+
+    - Uses `t_work` which is of class [Thread Work](https://github.com/IntelligentSoftwareSystems/Galois/blob/2a2e5656d739c6228c996ce2f952ec65216aa22f/libgpu/include/thread_work.h) from libgpu
+
+    - Runs the [inspection kernel](#inspection-kernel) with `t_work`
+
+    - Uses the thread work object to load balance in the call
+      to `bfs_kernel_dev_TB_LB` [kernel](#BFS-Load-balancer)
+
+    - Calls to [bfs kernel](#bfs-kernel) through the
+      [this kernel](#Call-BFS-after-waitlist-reset)
 
 ```Cuda
 void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim3& blocks, dim3& threads)
@@ -357,8 +369,11 @@ void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim
 
 ## BFS dispatcher without load balancing
 
-launch bounds has a good description on this
+* launch bounds has a good description on this
 [stack overflow post](https://stackoverflow.com/questions/44704506/limiting-register-usage-in-cuda-launch-bounds-vs-maxrregcount).
+
+* Dispatches `bfs_kernel_dev` [kernel](#bfs-kernel)
+  for each level.
 
 ```Cuda
 __global__ void __launch_bounds__(__tb_gg_main_pipe_1_gpu_gb) gg_main_pipe_1_gpu_gb(CSRGraph gg, int LEVEL, PipeContextT<Worklist2> pipe, int* cl_LEVEL, bool enable_lb, GlobalBarrier gb)
@@ -387,7 +402,7 @@ __global__ void __launch_bounds__(__tb_gg_main_pipe_1_gpu_gb) gg_main_pipe_1_gpu
 ## BFS dispatch wrapper
 
 * If load-balancing, calls `gg_main_pipe_1`
-  [kernel](Load-Balancing-BFS-Dispatcher)
+  [kernel](#Load-Balancing-BFS-Dispatcher)
 
 * Otherwise, invokes the `gg_main_pipe_1_gpu_gb`
   [kernel](#BFS-dispatcher-without-load-balancing)
@@ -425,7 +440,8 @@ for blocks/thread size.
 
 * Calls [`bfs_init`](#bfs-initialization) then sychronizes.
 
-* Puts start node on the worklist and calls the `gg_main_pipe_1_wrapper`
+* Puts start node on the worklist and calls the 
+  [`gg_main_pipe_1_wrapper`](#bfs-dispatch-wrapper)
 
 ```Cuda
 void gg_main(CSRGraph& hg, CSRGraph& gg)
