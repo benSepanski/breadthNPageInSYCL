@@ -23,11 +23,16 @@ Our aim is for these benchmarks to be easily reproducible.
   implementations
 * `annotatedLonestar` provides annotations on the Lonestar GPU
   implemenations of BFS and PR for quick reference
+* `libcommon` provides implementations of objects needed in both
+  bfs and pagerank (such as a graph which plays with SYCL,
+  and a worklist)
 
 ## SYCL Resources
 
 The [manual](https://www.khronos.org/registry/SYCL/specs/sycl-1.2.1.pdf)
 is a surprisingly good resource.
+You should probably look at one or two hello-world
+SYCL programs first though (e.g. [this tutorial](https://tech.io/playgrounds/48226/introduction-to-sycl/getting-started))
 
 * A good resource for the SYCL computing paradigms is chapter 3 of the manual.
   The chapter is also short enough that you can read through it
@@ -52,6 +57,12 @@ is a surprisingly good resource.
   but way too long to read through.
   Use the table of contents to jump to specific classes you are
   interested in.
+
+    - [here](https://www.khronos.org/registry/SYCL/specs/sycl-1.2.1.pdf#page=150&zoom=100,96,730)
+      is the documentation for items/ranges/etc.
+
+    - explicit memory management is discussed [here](https://www.khronos.org/registry/SYCL/specs/sycl-1.2.1.pdf#page=182&zoom=100,96,329)
+      in the manual
 
 ## Setup & Installation
 
