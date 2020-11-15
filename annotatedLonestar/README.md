@@ -18,3 +18,6 @@ This explains the `gg_main()` function which you see in
 One should note that the first CSR argument to `gg_main()` is
 the graph on the host, and the second CSR argument
 to `gg_main()` is the graph on the device.
+
+One should note the skeleton app also handles writing
+output.

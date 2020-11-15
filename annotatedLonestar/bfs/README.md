@@ -321,6 +321,10 @@ __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 
   bfs_kernel_dev(graph, LEVEL, enable_lb, in_wl, out_wl);
 }
 ```
+
+This kernel runs until the waitlist is empty.
+
+
 ```Cuda
 void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim3& blocks, dim3& threads)
 {
@@ -350,7 +354,10 @@ void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim
 }
 ```
 
-## Utility
+## BFS dispatcher without load balancing
+
+launch bounds has a good description on this
+[stack overflow post](https://stackoverflow.com/questions/44704506/limiting-register-usage-in-cuda-launch-bounds-vs-maxrregcount).
 
 ```Cuda
 __global__ void __launch_bounds__(__tb_gg_main_pipe_1_gpu_gb) gg_main_pipe_1_gpu_gb(CSRGraph gg, int LEVEL, PipeContextT<Worklist2> pipe, int* cl_LEVEL, bool enable_lb, GlobalBarrier gb)
@@ -376,7 +383,11 @@ __global__ void __launch_bounds__(__tb_gg_main_pipe_1_gpu_gb) gg_main_pipe_1_gpu
 }
 ```
 
-## gg_main
+## gg\_main
+
+* If load-balancing, calls `gg_main_pipe_1`
+
+* Otherwise, invokes the `gg_main_pipe_1_gpu_gb` kernel
 
 ```Cuda
 void gg_main_pipe_1_wrapper(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim3& blocks, dim3& threads)
@@ -403,6 +414,14 @@ void gg_main_pipe_1_wrapper(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& p
   }
 }
 ```
+
+* See [kernel sizing](https://github.com/IntelligentSoftwareSystems/Galois/blob/2a2e5656d739c6228c996ce2f952ec65216aa22f/libgpu/src/skelapp/skel.cu#L37)
+for blocks/thread size.
+
+* Calls [`bfs_init`](#bfs-initialization) then sychronizes.
+
+* Puts start node on the worklist and calls the `gg_main_pipe_1_wrapper`
+
 ```Cuda
 void gg_main(CSRGraph& hg, CSRGraph& gg)
 {
