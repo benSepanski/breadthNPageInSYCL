@@ -324,6 +324,7 @@ __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 
 
 This kernel runs until the waitlist is empty.
 
+## Load Balancing BFS Dispatcher
 
 ```Cuda
 void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim3& blocks, dim3& threads)
@@ -383,11 +384,13 @@ __global__ void __launch_bounds__(__tb_gg_main_pipe_1_gpu_gb) gg_main_pipe_1_gpu
 }
 ```
 
-## gg\_main
+## BFS dispatch wrapper
 
 * If load-balancing, calls `gg_main_pipe_1`
+  [kernel](Load-Balancing-BFS-Dispatcher)
 
-* Otherwise, invokes the `gg_main_pipe_1_gpu_gb` kernel
+* Otherwise, invokes the `gg_main_pipe_1_gpu_gb`
+  [kernel](#BFS-dispatcher-without-load-balancing)
 
 ```Cuda
 void gg_main_pipe_1_wrapper(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim3& blocks, dim3& threads)
@@ -414,6 +417,8 @@ void gg_main_pipe_1_wrapper(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& p
   }
 }
 ```
+
+## gg\_main
 
 * See [kernel sizing](https://github.com/IntelligentSoftwareSystems/Galois/blob/2a2e5656d739c6228c996ce2f952ec65216aa22f/libgpu/src/skelapp/skel.cu#L37)
 for blocks/thread size.
