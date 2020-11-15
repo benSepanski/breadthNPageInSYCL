@@ -19,5 +19,8 @@ One should note that the first CSR argument to `gg_main()` is
 the graph on the host, and the second CSR argument
 to `gg_main()` is the graph on the device.
 
-One should note the skeleton app also handles writing
-output.
+One should note the skeleton app also calls the function that writes
+the output.
+The output function
+is defined in the `support.cu`
+file in each folder.

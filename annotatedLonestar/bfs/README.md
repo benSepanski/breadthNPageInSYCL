@@ -58,6 +58,24 @@ __global__ void bfs_init(CSRGraph graph, int src)
 
 ## BFS Load-balancer
 
+This implements the fine-grained scheduling as described in the
+[IrGL Paper](https://dl.acm.org/doi/10.1145/2983990.2984015)
+(in section 4.3).
+
+* `compute_src_and_offset` is defined in the ThreadWork
+  class [here](https://github.com/IntelligentSoftwareSystems/Galois/blob/158b572802864bedc2db6b6d3c37d1fdd5035886/libgpu/include/thread_work.h#L54).
+
+* Repeatedly does the following:
+    
+    - Has thread 0 of the block
+      figure out the block start index and block end index
+    - If we haven't done all out work yet:
+        - Get the thread's source node and edge offset `offset`
+        - Get the `offset`th edge of the source node
+        - If that destination node is newly discovered,
+          put it on the queue and mark it as on this level
+
+
 ```Cuda
 __global__ void bfs_kernel_dev_TB_LB(CSRGraph graph, int LEVEL, int * thread_prefix_work_wl, unsigned int num_items, PipeContextT<Worklist2> thread_src_wl, Worklist2 in_wl, Worklist2 out_wl)
 {
@@ -161,7 +179,42 @@ __global__ void Inspect_bfs_kernel_dev(CSRGraph graph, int LEVEL, PipeContextT<W
 }
 ```
 
-## BFS Kernel
+## BFS Kernel without load balancing
+
+Some of the notation refers to scheduling policies from the
+[IrGL Paper](https://dl.acm.org/doi/10.1145/2983990.2984015)
+(in section 4.3).
+The 
+`tb` refers to threadblock, `wp` to warp.
+Look to section 4.3.1 for definitions
+(and listing 10 and 11 to see how they are combined).
+The `while(true)` loop in listing 11 corresponds to the
+`while(true)` loop here, and inside
+we see the scheduling combination described in listing 10.
+
+* Repeatedly:
+    - get the node corresponding to this thread on
+      the worklist
+    - Record in `nps.temp_storage`
+      information about the node if it has 
+      fewer than `_NP_CROSSOVER_WP` edges
+    - `while(true)`
+        - If `_np.size` (node degree/edges left to process)
+          is at least `_NP_CROSSOVER_TB` 
+          (`if (_np.size >= _NP_CROSSOVER_TB)`) then we're not done
+        - If no more work to do (`nps.tb.owner == MAX_TB_SIZE+1`)
+          then break out of the loop
+        - If we're not done, loop over the edges in threadblock
+          scheduling (parallelize inner loop across block)
+          (usually in blocks of 256, the typical thread-block size)
+        - If there is still work to be done
+          (`_np.size >= _NP_CROSSOVER_WP && _np.size < _NP_CROSSOVER_TB`)
+          give these to each warp and have the warp
+          parallelize the inner loop (in blocks of 32 (warp size))
+        - Finally, while there is work left do it in a fine-grained
+          schedule (`while(_np.work())`)
+    
+TODO: Revisit this, I don't understand it very clearly
 
 ```CUDA
 __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
@@ -319,7 +372,7 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
 }
 ```
 
-## Call BFS after waitlist reset
+## Call BFS after worklist reset
 
 ```Cuda
 __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
@@ -341,11 +394,13 @@ __global__ void bfs_kernel(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 
 
     - Runs the [inspection kernel](#inspection-kernel) with `t_work`
 
-    - Uses the thread work object to load balance in the call
-      to `bfs_kernel_dev_TB_LB` [kernel](#BFS-Load-balancer)
+    - Uses `t_work` to run a load-balanced BFS round using
+      the `bfs_kernel_dev_TB_LB` [kernel](#BFS-Load-balancer)
+      on the high-degree nodes (as determined by the inspection kernel)
 
-    - Calls to [bfs kernel](#bfs-kernel) through the
-      [this kernel](#Call-BFS-after-waitlist-reset)
+    - Calls to [bfs kernel](#bfs-kernel-without-load-balancing) through
+      [this kernel](#Call-BFS-after-worklist-reset) on the non-high
+      degree nodes (as determined by the inspection kernel)
 
 ```Cuda
 void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim3& blocks, dim3& threads)
@@ -381,7 +436,7 @@ void gg_main_pipe_1(CSRGraph& gg, int& LEVEL, PipeContextT<Worklist2>& pipe, dim
 * launch bounds has a good description on this
 [stack overflow post](https://stackoverflow.com/questions/44704506/limiting-register-usage-in-cuda-launch-bounds-vs-maxrregcount).
 
-* Dispatches `bfs_kernel_dev` [kernel](#bfs-kernel)
+* Dispatches `bfs_kernel_dev` [kernel](#bfs-kernel-without-load-balancing)
   for each level.
 
 ```Cuda
