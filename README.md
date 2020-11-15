@@ -24,6 +24,37 @@ Our aim is for these benchmarks to be easily reproducible.
 * `annotatedLonestar` provides annotations on the Lonestar GPU
   implemenations of BFS and PR for quick reference
 
+## SYCL Resources
+
+The [manual](https://www.khronos.org/registry/SYCL/specs/sycl-1.2.1.pdf)
+is a surprisingly good resource.
+
+* A good resource for the SYCL computing paradigms is chapter 3 of the manual.
+  The chapter is also short enough that you can read through it
+  (especially if you skip over the OpenCL sections)
+
+    - Section 3.5.2 has some good information on the SYCL memory model.
+      Section 3.7 explicitly describes the memory objects. 
+
+    - Section 3.6.3 describes a convenient syntax for representing
+      tasks that have an outer loop distributed across work groups
+      and inner loop distributed across work items!
+
+    - To perform outlining (as described in section 4.1
+      of the [IrGL Paper](https://dl.acm.org/doi/10.1145/2983990.2984015)
+      we will probably use the `single_task` as described
+      in section 3.6.4 of the manual
+
+    - Synchronization is described in section 3.6.5.2
+
+* Chapter 4 of the manual covers specific functions. It is a good 
+  reference for classes,
+  but way too long to read through.
+  Use the table of contents to jump to specific classes you are
+  interested in.
+
+## Setup & Installation
+
 ### Tuxedo Setup
 
 1. If you are not on campus, connect to the [UT VPN](https://wikis.utexas.edu/display/engritgpublic/Connecting+to+the+University+of+Texas+VPN).
