@@ -10,7 +10,7 @@
 #define BREADTHNPAGEINSYCL_SYCLUTILS_HOST_CSR_GRAPH_
 
 #include <cassert>
-#include <ctime>
+#include <chrono>
 #include <fcntl.h>
 #include <fstream>
 #include <sys/mman.h>
@@ -190,7 +190,7 @@ unsigned Host_CSR_Graph<node_data_type>::readFromGR(char file[]) {
     abort();
   }
 
-  std::clock_t start = std::clock();
+  auto startTime = std::chrono::system_clock::now();
 
   // parse file
   uint64_t* fptr                           = (uint64_t*)m;
@@ -230,17 +230,18 @@ unsigned Host_CSR_Graph<node_data_type>::readFromGR(char file[]) {
                edgeindex);
 
       this->edge_dst[edgeindex] = dst;
-
-      progressPrint(this->nnodes, ii);
     }
+
+    progressPrint(this->nnodes, ii);
   }
 
   cfile.close(); // probably galois doesn't close its file due to mmap.
-  double time = ( std::clock() - start ) / (double) CLOCKS_PER_SEC;
+  auto endTime = std::chrono::system_clock::now();
+  double time_in_ms = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
 
   // TODO: fix MB/s
-  printf("read %lld bytes in %d ms (%0.2f MB/s)\n\r\n", masterLength,
-         time * 1000, (masterLength / 1000.0) / (time * 1000));
+  printf("read %lld bytes in %0.2f ms (%0.2f MB/s)\n\r\n",
+         masterLength, time_in_ms, (masterLength / 1000.0) / time_in_ms);
 
   return 0;
 }
