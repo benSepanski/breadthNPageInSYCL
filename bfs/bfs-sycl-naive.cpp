@@ -1,50 +1,63 @@
 #include <iostream>
+
 #include <CL/sycl.hpp>
 
-// Host_CSR_Graph
+// From libsyclutils
+//
+// Host_CSR_Graph index_type
 #include "host_csr_graph.h"
 // SYCL_CSR_Graph
 #include "sycl_csr_graph.h"
 
-class vector_addition;
+// node data type
+typedef uint64_t node_data_type;
+#define INF UINT64_MAX 
+
+class bfs_init;
 
 int main(int, char**) {
+   // TODO: Take selector, graph, src node as cmd line arguments
     
-   char file[] = "/net/ohm/export/iss/dist-inputs/rmat15.txt";
-   Host_CSR_Graph<int> host_graph;
+   // Read in graph
+   char file[] = "/net/ohm/export/iss/dist-inputs/rmat15.gr";
+   Host_CSR_Graph<node_data_type> host_graph;
    host_graph.readFromGR(file);
-   SYCL_CSR_Graph<int> sycl_graph(&host_graph);
 
-   cl::sycl::float4 a = { 1.0, 2.0, 3.0, 4.0 };
-   cl::sycl::float4 b = { 4.0, 3.0, 2.0, 1.0 };
-   cl::sycl::float4 c = { 0.0, 0.0, 0.0, 0.0 };
+   // Assume source is 0
+   index_type src_node = 0;
 
+   // Select default device
    cl::sycl::default_selector device_selector;
 
+   // Build our queue and report device
    cl::sycl::queue queue(device_selector);
    std::cout << "Running on "
              << queue.get_device().get_info<cl::sycl::info::device::name>()
              << "\n";
-   {
-      cl::sycl::buffer<cl::sycl::float4, 1> a_sycl(&a, cl::sycl::range<1>(1));
-      cl::sycl::buffer<cl::sycl::float4, 1> b_sycl(&b, cl::sycl::range<1>(1));
-      cl::sycl::buffer<cl::sycl::float4, 1> c_sycl(&c, cl::sycl::range<1>(1));
-  
-      queue.submit([&] (cl::sycl::handler& cgh) {
-         auto a_acc = a_sycl.get_access<cl::sycl::access::mode::read>(cgh);
-         auto b_acc = b_sycl.get_access<cl::sycl::access::mode::read>(cgh);
-         auto c_acc = c_sycl.get_access<cl::sycl::access::mode::discard_write>(cgh);
 
-         cgh.single_task<class vector_addition>([=] () {
-         c_acc[0] = a_acc[0] + b_acc[0];
-         });
+   // SYCL Scope
+   {
+      // Build our sycl graph inside scope so that buffers can be destroyed
+      // by destructor
+      SYCL_CSR_Graph<node_data_type> sycl_graph(&host_graph);
+
+      // Submit a command group that sets node data to INF or 0 (if it's src node)
+      queue.submit([&] (cl::sycl::handler& cgh) {
+         auto node_data_acc = sycl_graph.node_data.get_access<cl::sycl::access::mode::discard_write>(cgh);
+
+         cgh.parallel_for<class bfs_init>(cl::sycl::range<1>{sycl_graph.nnodes},
+             [=] (cl::sycl::id<1> index) {
+                node_data_acc[index] = (index.get(0) == src_node) ? 0 : INF;
+             });
       });
+   }  // End SYCL scope
+
+   // Verify that node data is all ones
+   for(int i = 0; i < host_graph.nnodes; ++i) {
+       if( host_graph.node_data[i] != INF) {
+           printf("Node %d has data %d != INF\n", i, host_graph.node_data[i]);
+       }
    }
-   std::cout << "  A { " << a.x() << ", " << a.y() << ", " << a.z() << ", " << a.w() << " }\n"
-        << "+ B { " << b.x() << ", " << b.y() << ", " << b.z() << ", " << b.w() << " }\n"
-        << "------------------\n"
-        << "= C { " << c.x() << ", " << c.y() << ", " << c.z() << ", " << c.w() << " }"
-        << std::endl;
                 
    return 0;
 }
