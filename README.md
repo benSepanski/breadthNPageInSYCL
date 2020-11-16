@@ -64,6 +64,12 @@ SYCL programs first though (e.g. [this tutorial](https://tech.io/playgrounds/482
     - explicit memory management is discussed [here](https://www.khronos.org/registry/SYCL/specs/sycl-1.2.1.pdf#page=182&zoom=100,96,329)
       in the manual
 
+[Here](https://developer.codeplay.com/products/computecpp/ce/guides/sycl-guide/error-handling) is
+a nice error-handling guide. Make sure you put also try putting a try/catch
+block around the first `queue.submit` call.
+
+Importantly: SYCL atomics don't work with 64-bit integers on NVIDIA gpus yet.
+
 ## Setup & Installation
 
 ### Tuxedo Setup
