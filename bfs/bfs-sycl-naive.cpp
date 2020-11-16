@@ -1,9 +1,20 @@
 #include <iostream>
 #include <CL/sycl.hpp>
 
+// Host_CSR_Graph
+#include "host_csr_graph.h"
+// SYCL_CSR_Graph
+#include "sycl_csr_graph.h"
+
 class vector_addition;
 
 int main(int, char**) {
+    
+   char file[] = "/net/ohm/export/iss/dist-inputs/rmat15.txt";
+   Host_CSR_Graph<int> host_graph;
+   host_graph.readFromGR(file);
+   SYCL_CSR_Graph<int> sycl_graph(&host_graph);
+
    cl::sycl::float4 a = { 1.0, 2.0, 3.0, 4.0 };
    cl::sycl::float4 b = { 4.0, 3.0, 2.0, 1.0 };
    cl::sycl::float4 c = { 0.0, 0.0, 0.0, 0.0 };
