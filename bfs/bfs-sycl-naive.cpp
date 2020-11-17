@@ -30,8 +30,8 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selecto
         try {
           std::rethrow_exception(e);
         } catch(cl::sycl::exception const& e) {
-          std::cout << "Caught asynchronous SYCL exception:\n"
-                    << e.what() << std::endl;
+          std::cerr << "Caught asynchronous SYCL exception:\n" << e.what() << std::endl;
+          std::exit(1);
         }
       }
     };
@@ -62,7 +62,8 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selecto
                  });
           });
       } catch (cl::sycl::exception const& e) {
-          std::cout << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+          std::cerr << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+          std::exit(1);
       }
 
       // Build a worklist buffer of nodes
@@ -119,7 +120,8 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selecto
               });
           });
           } catch (cl::sycl::exception const& e) {
-              std::cout << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+              std::cerr << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+              std::exit(1);
           }
 
           // wait for iter to finish
@@ -141,7 +143,8 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selecto
   try {
     queue.wait_and_throw();
   } catch (cl::sycl::exception const& e) {
-    std::cout << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+    std::cerr << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+    std::exit(1);
   }
 
   return 0;

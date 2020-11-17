@@ -6,11 +6,13 @@
 
 #include "nvidia_selector.h"
 
+#define CL_DEVICE_PCI_BUS_ID_NV 0x4008
+
 int NVIDIA_Selector::operator()(const cl::sycl::device &device) const {
     // If the device is not an NVIDIA GPU, don't choose it
     if( !device.is_gpu() ) return -1;
-    const char *vendor_name = device.get_info<cl::sycl::info::device::vendor>().c_str();
-    if( strcmp(vendor_name, "NVIDIA") != 0 ) return -1;
+    cl::sycl::string_class vendor_name = device.get_info<cl::sycl::info::device::vendor>().c_str();
+    if( strcmp(vendor_name.c_str(), "NVIDIA Corporation") != 0 ) return -1;
 
     // Recover the NVIDIA order by sorting according to PCI bus ID
     //
@@ -25,11 +27,11 @@ int NVIDIA_Selector::operator()(const cl::sycl::device &device) const {
     bool nvidia_plat_found = false;
     for( const auto &plat : cl::sycl::platform::get_platforms() ) {
         // skip non-NVIDIA platforms
-        if( strcmp("NVIDIA", plat.get_info<cl::sycl::info::platform::vendor>().c_str()) != 0 ) {
+        if( strcmp("NVIDIA Corporation", plat.get_info<cl::sycl::info::platform::vendor>().c_str()) != 0 ) {
             continue;
         }
         if( nvidia_plat_found ) {
-            printf("Multiple NVIDIA platforms, aborting.\n");
+            fprintf(stderr, "Multiple \"NVIDIA Corporation\" platforms, aborting.\n");
             std::exit(1);
         }
         nvidia_plat_found = true;
@@ -41,7 +43,7 @@ int NVIDIA_Selector::operator()(const cl::sycl::device &device) const {
                                       sizeof(cl_int), &dev_pci_bus_id, NULL);
         }
         catch(const cl::sycl::exception &e) {
-            std::cout << "Caught SYCL exception:\n"
+            std::cerr << "Caught SYCL exception:\n"
                       << e.what() << std::endl;
             std::exit(1);
         }
@@ -56,7 +58,7 @@ int NVIDIA_Selector::operator()(const cl::sycl::device &device) const {
                                          sizeof(cl_int), &other_pci_bus_id, NULL);
            }
            catch(const cl::sycl::exception &e) {
-               std::cout << "Caught SYCL exception:\n"
+               std::cerr << "Caught SYCL exception:\n"
                          << e.what() << std::endl;
                std::exit(1);
            }
