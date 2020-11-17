@@ -181,7 +181,8 @@ Some of the notation refers to scheduling policies from the
 [IrGL Paper](https://dl.acm.org/doi/10.1145/2983990.2984015)
 (in section 4.3).
 The 
-`tb` refers to threadblock, `wp` to warp. `np` refers to ``nested parallelism"
+`tb` refers to threadblock, `wp` to warp, and `fg` to fine-grained.
+`np` refers to ``nested parallelism"
 (I believe the notation comes from the [CUDA-NP paper](https://dl.acm.org/doi/10.1145/2555243.2555254), but it
 for our purposes it is described in section 4 of the [IrGL Paper](https://dl.acm.org/doi/10.1145/2983990.2984015)).
 and the relevant classes live in [libgpu/incldue/internal.h](https://github.com/IntelligentSoftwareSystems/Galois/blob/8fa18faea4cd0df855ae5d78a6aa2501c4cca6cd/libgpu/include/internal.h).
@@ -191,35 +192,13 @@ The `while(true)` loop in listing 11 corresponds to the
 `while(true)` loop here, and inside
 we see the scheduling combination described in listing 10.
 
-* Repeatedly:
-    - get the node corresponding to this thread on
-      the worklist
-    - Record in `nps.temp_storage`
-      information about the node if it has 
-      fewer than `_NP_CROSSOVER_WP` edges
-    - `while(true)`
-        - If `_np.size` (node degree/edges left to process)
-          is at least `_NP_CROSSOVER_TB` 
-          (`if (_np.size >= _NP_CROSSOVER_TB)`) then we're not done
-        - If no more work to do (`nps.tb.owner == MAX_TB_SIZE+1`)
-          then break out of the loop
-        - If we're not done, loop over the edges in threadblock
-          scheduling (parallelize inner loop across block)
-          (usually in blocks of 256, the typical thread-block size)
-        - If there is still work to be done
-          (`_np.size >= _NP_CROSSOVER_WP && _np.size < _NP_CROSSOVER_TB`)
-          give these to each warp and have the warp
-          parallelize the inner loop (in blocks of 32 (warp size))
-        - Finally, while there is work left do it in a fine-grained
-          schedule (`while(_np.work())`)
+Due to the length of this code, I am putting annotations in inline comments.
     
-TODO: Revisit this, I don't understand it very clearly
-
 ```CUDA
 __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Worklist2 in_wl, Worklist2 out_wl)
 {
-  unsigned tid = TID_1D;
-  unsigned nthreads = TOTAL_THREADS_1D;
+  unsigned tid = TID_1D; // Global thread ID
+  unsigned nthreads = TOTAL_THREADS_1D;  // total num threads
 
   const unsigned __kernel_tb_size = __tb_bfs_kernel;
   index_type wlnode_end;
@@ -231,14 +210,20 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
   typedef cub::BlockScan<multiple_sum<2, index_type>, BLKSIZE> BlockScan;
   typedef union np_shared<BlockScan::TempStorage, index_type, struct tb_np, struct warp_np<__kernel_tb_size/32>, struct fg_np<ITSIZE> > npsTy;
 
-  __shared__ npsTy nps ;
+  __shared__ npsTy nps ;  // Note that this is shared
   wlnode_end = roundup((*((volatile index_type *) (in_wl).dindex)), (blockDim.x));
+  // Each thread is assigned nodes in the waitlist according to thread-id
   for (index_type wlnode = 0 + tid; wlnode < wlnode_end; wlnode += nthreads)
   {
     int node;
     bool pop;
     multiple_sum<2, index_type> _np_mps;
     multiple_sum<2, index_type> _np_mps_total;
+    // As long as you have a valid node (and if load-balancing is enabled,
+    // if the out-degree is small enough that this node has not already 
+    // been handled by the load-balancer)
+    // get some nested parallelism info about your node, storing degree as
+    // as _np.size and the first as as _np.start.
     pop = (in_wl).pop_id(wlnode, node) && ((( node < (graph).nnodes ) && ( (graph).getOutDegree(node) < DEGREE_LIMIT)) ? true: false);
     struct NPInspector1 _np = {0,0,0,0,0,0};
     if (pop)
@@ -246,26 +231,38 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
       _np.size = (graph).getOutDegree(node);
       _np.start = (graph).getFirstEdge(node);
     }
+    // TODO: what is this??
     _np_mps.el[0] = _np.size >= _NP_CROSSOVER_WP ? _np.size : 0;
     _np_mps.el[1] = _np.size < _NP_CROSSOVER_WP ? _np.size : 0;
     BlockScan(nps.temp_storage).ExclusiveSum(_np_mps, _np_mps, _np_mps_total);
+    // nps.tb.owner is the nested-parallelism thread-block owner.
+    // Different threads will compete for thread-block ownership until
+    // all threads have had a chance to get their inner loop handled
+    // by thread-block.
+    // It starts out as an invalid index.
     if (threadIdx.x == 0)
     {
       nps.tb.owner = MAX_TB_SIZE + 1;
     }
     __syncthreads();
+    // threads repeatedly compete to have the thread-block work
+    // on their inner loop
     while (true)
     {
+      // Compete for ownership (if you have a big enough inner loop)
       if (_np.size >= _NP_CROSSOVER_TB)
       {
         nps.tb.owner = threadIdx.x;
       }
       __syncthreads();
+      // If no-one asked for ownership, we're done!
       if (nps.tb.owner == MAX_TB_SIZE + 1)
       {
         __syncthreads();
         break;
       }
+      // If someone got ownership, have them load their information
+      // into the shared nps object
       if (nps.tb.owner == threadIdx.x)
       {
         nps.tb.start = _np.start;
@@ -277,10 +274,12 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
       __syncthreads();
       int ns = nps.tb.start;
       int ne = nps.tb.size;
+      // Relinquish ownership for next round
       if (nps.tb.src == threadIdx.x)
       {
         nps.tb.owner = MAX_TB_SIZE + 1;
       }
+      // Handle the thread-block owners inner-loop as a thread-block
       for (int _np_j = threadIdx.x; _np_j < ne; _np_j += BLKSIZE)
       {
         index_type edge;
