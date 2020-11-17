@@ -11,14 +11,13 @@
 
 // from Galois::gpu
 //
-// HOST_CSR_Graph index_type
+// HOST_CSR_Graph index_type node_data_type
 #include "host_csr_graph.h"
 
 /**
  * A CSR graph with node data represented
  * as SYCL buffers
  */
-template<typename node_data_type>
 struct SYCL_CSR_Graph {
     index_type nnodes, nedges;
     // All are 1-D buffers
@@ -26,7 +25,7 @@ struct SYCL_CSR_Graph {
     cl::sycl::buffer<node_data_type, 1> node_data;
 
     /** Construct SYCL_CSR_Graph from a CSR_Graph */
-    SYCL_CSR_Graph( Host_CSR_Graph<node_data_type> *graph )
+    SYCL_CSR_Graph( Host_CSR_Graph *graph )
         : nnodes   {graph->nnodes}
         , nedges   {graph->nedges}
         , row_start{graph->row_start, cl::sycl::range<1>{graph->nnodes}}

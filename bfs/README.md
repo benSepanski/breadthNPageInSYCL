@@ -8,3 +8,4 @@ Then, run
 cd $BUILD_DIR/bfs
 make
 ```
+Run it with the same options as lonestar.

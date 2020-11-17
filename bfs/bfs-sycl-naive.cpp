@@ -1,5 +1,6 @@
 #include <iostream>
 #include <limits>
+#include <CL/cl.h>
 #include <CL/sycl.hpp>
 
 // From libsyclutils
@@ -10,7 +11,7 @@
 #include "sycl_csr_graph.h"
 
 // from support.cpp
-extern void output(const Host_CSR_Graph<uint64_t>&, char[]);
+extern index_type start_node;
 
 typedef uint64_t node_data_type;
 // defined here, but const so need to declare as extern so support.cpp
@@ -21,20 +22,7 @@ extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
 class bfs_init;
 class bfs_iter;
 
-int main(int, char**) {
-   // TODO: Take selector, graph, src node as cmd line arguments
-    
-   // Read in graph
-   char file[] = "/net/ohm/export/iss/dist-inputs/rmat15.gr";
-   Host_CSR_Graph<node_data_type> host_graph;
-   host_graph.readFromGR(file);
-
-   // Assume source is 0
-   index_type src_node = 0;
-
-   // Select default device
-   cl::sycl::default_selector device_selector;
-
+int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selector) {
    // From https://developer.codeplay.com/products/computecpp/ce/guides/sycl-guide/error-handling
    // to catch asynchronous exceptions
    auto exception_handler = [] (cl::sycl::exception_list exceptions) {
@@ -49,30 +37,32 @@ int main(int, char**) {
     };
 
    // Build our queue and report device
-   cl::sycl::queue queue(device_selector, exception_handler);
-   std::cout << "Running on "
+   cl::sycl::queue queue(dev_selector, exception_handler);
+   std::cerr << "Running on "
              << queue.get_device().get_info<cl::sycl::info::device::name>()
              << "\n";
+
+   // copy start_node into local variable so we can use it inside SYCL kernels
+   const index_type START_NODE = start_node;
 
    // SYCL Scope
    {
       // Build our sycl graph inside scope so that buffers can be destroyed
       // by destructor
-      SYCL_CSR_Graph<node_data_type> sycl_graph(&host_graph);
+      SYCL_CSR_Graph sycl_graph(&host_graph);
 
       try {
-      // Set node data to INF or 0 (if it's src node)
-      queue.submit([&] (cl::sycl::handler& cgh) {
-         auto node_data_acc = sycl_graph.node_data.get_access<cl::sycl::access::mode::discard_write>(cgh);
+          // Set node data to INF or 0 (if it's src node)
+          queue.submit([&] (cl::sycl::handler& cgh) {
+             auto node_data_acc = sycl_graph.node_data.get_access<cl::sycl::access::mode::discard_write>(cgh);
 
-         cgh.parallel_for<class bfs_init>(cl::sycl::range<1>{sycl_graph.nnodes},
-             [=] (cl::sycl::id<1> index) {
-                node_data_acc[index] = (index.get(0) == src_node) ? 0 : INF;
-             });
-      });
+             cgh.parallel_for<class bfs_init>(cl::sycl::range<1>{sycl_graph.nnodes},
+                 [=] (cl::sycl::id<1> index) {
+                    node_data_acc[index] = (index.get(0) == START_NODE) ? 0 : INF;
+                 });
+          });
       } catch (cl::sycl::exception const& e) {
-      std::cout << "Caught synchronous SYCL exception:\n"
-                << e.what() << std::endl;
+          std::cout << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
       }
 
       // Build a worklist buffer of nodes
@@ -85,13 +75,14 @@ int main(int, char**) {
 
       // initialize src node on in worklist
       auto in_wl_acc = in_worklist_buf->get_access<cl::sycl::access::mode::discard_write>();
-      in_wl_acc[0] = src_node;
+      in_wl_acc[0] = START_NODE;
  
       // Run bfs for each level
       node_data_type level = 1;
       while( in_worklist_size > 0 && level < INF) {
-          printf("Running level %d, worklist size=%d\n", level, in_worklist_size);
+          fprintf(stderr, "Running level %lu, worklist size=%d\n", level, in_worklist_size);
           // run an iteration of bfs at the given level
+          try {
           queue.submit([&] (cl::sycl::handler &cgh) {
               // for i/o
               //cl::sycl::stream sycl_stream(1024, 256, cgh);
@@ -125,8 +116,11 @@ int main(int, char**) {
                             out_worklist_acc[wl_index] = dst_node;
                         }
                     }
-                });
+              });
           });
+          } catch (cl::sycl::exception const& e) {
+              std::cout << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+          }
 
           // wait for iter to finish
           queue.wait();
@@ -142,20 +136,13 @@ int main(int, char**) {
       out_worklist_buf = NULL;
    }  // End SYCL scope
 
-  // error handling as in https://developer.codeplay.com/products/computecpp/ce/guides/sycl-guide/error-handling
+  // asynchronous error handling as in
+  // https://developer.codeplay.com/products/computecpp/ce/guides/sycl-guide/error-handling
   try {
-      queue.wait_and_throw();
+    queue.wait_and_throw();
   } catch (cl::sycl::exception const& e) {
-  std::cout << "Caught synchronous SYCL exception:\n"
-            << e.what() << std::endl;
+    std::cout << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
   }
 
-
-
-   // Write to outputfile
-   // TODO : Take output file from command line
-   char out_file[] = "rmat15.txt";
-   output(host_graph, out_file);
-
-   return 0;
+  return 0;
 }
