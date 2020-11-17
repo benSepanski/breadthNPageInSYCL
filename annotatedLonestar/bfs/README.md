@@ -58,10 +58,6 @@ __global__ void bfs_init(CSRGraph graph, int src)
 
 ## BFS Load-balancer
 
-This implements the fine-grained scheduling as described in the
-[IrGL Paper](https://dl.acm.org/doi/10.1145/2983990.2984015)
-(in section 4.3).
-
 * `compute_src_and_offset` is defined in the ThreadWork
   class [here](https://github.com/IntelligentSoftwareSystems/Galois/blob/158b572802864bedc2db6b6d3c37d1fdd5035886/libgpu/include/thread_work.h#L54).
 
