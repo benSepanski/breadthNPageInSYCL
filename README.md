@@ -23,8 +23,9 @@ Our aim is for these benchmarks to be easily reproducible.
   implementations
 * `annotatedLonestar` provides annotations on the Lonestar GPU
   implemenations of BFS and PR for quick reference
-* `libcommon` provides implementations of objects needed in both
-  bfs and pagerank (such as a graph which plays with SYCL,
+* `libsyclutils` provides a skeleton for the bfs and pagerank
+  SYCL applications, as well as some objects needed in both
+  (such as a graph which plays with SYCL,
   and a worklist)
 
 ## SYCL Resources
