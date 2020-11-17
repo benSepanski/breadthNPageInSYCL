@@ -81,13 +81,9 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selecto
       // Run bfs for each level
       node_data_type level = 1;
       while( in_worklist_size > 0 && level < INF) {
-          fprintf(stderr, "Running level %lu, worklist size=%d\n", level, in_worklist_size);
           // run an iteration of bfs at the given level
           try {
           queue.submit([&] (cl::sycl::handler &cgh) {
-              // for i/o
-              //cl::sycl::stream sycl_stream(1024, 256, cgh);
-
               // save current level in command group
               const node_data_type LEVEL = level;
 
