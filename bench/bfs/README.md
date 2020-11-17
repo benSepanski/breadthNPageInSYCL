@@ -9,3 +9,8 @@ the results to `bfs-rmat15.txt`, run
 $GALOIS_BUILD_DIR/lonestar/analytics/gpu/bfs/bfs-gpu -l -o bfs-rmat15.txt -s 0 /net/ohm/export/iss/dist-inputs/rmat15.gr
 ```
 Passing `-g` allows you to specify the `CUDA_DEVICE` (default 0) (see [skelapp in libgpu](https://github.com/IntelligentSoftwareSystems/Galois/blob/master/libgpu/src/skelapp/skel.cu)).
+
+## SYCL Implementations
+
+At the moment, all options are the same with the exception of `-l`, which is currently
+unavailable.
