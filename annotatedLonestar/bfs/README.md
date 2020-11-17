@@ -181,7 +181,10 @@ Some of the notation refers to scheduling policies from the
 [IrGL Paper](https://dl.acm.org/doi/10.1145/2983990.2984015)
 (in section 4.3).
 The 
-`tb` refers to threadblock, `wp` to warp.
+`tb` refers to threadblock, `wp` to warp. `np` refers to ``nested parallelism"
+(I believe the notation comes from the [CUDA-NP paper](https://dl.acm.org/doi/10.1145/2555243.2555254), but it
+for our purposes it is described in section 4 of the [IrGL Paper](https://dl.acm.org/doi/10.1145/2983990.2984015)).
+and the relevant classes live in [libgpu/incldue/internal.h](https://github.com/IntelligentSoftwareSystems/Galois/blob/8fa18faea4cd0df855ae5d78a6aa2501c4cca6cd/libgpu/include/internal.h).
 Look to section 4.3.1 for definitions
 (and listing 10 and 11 to see how they are combined).
 The `while(true)` loop in listing 11 corresponds to the
