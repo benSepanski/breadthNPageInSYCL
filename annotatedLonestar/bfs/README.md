@@ -231,9 +231,12 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
       _np.size = (graph).getOutDegree(node);
       _np.start = (graph).getFirstEdge(node);
     }
-    // TODO: what is this??
+    // These are used in fine-grained schedule
     _np_mps.el[0] = _np.size >= _NP_CROSSOVER_WP ? _np.size : 0;
     _np_mps.el[1] = _np.size < _NP_CROSSOVER_WP ? _np.size : 0;
+    // add up _np_mps and _np_mps_total across blocks, and store
+    // cumulative sum into _np_mps and totals into _np_mps_total
+    // https://nvlabs.github.io/cub/classcub_1_1_block_scan.html#a6ed3f77795e582df31d3d6d9d950615e
     BlockScan(nps.temp_storage).ExclusiveSum(_np_mps, _np_mps, _np_mps_total);
     // FIRST: do thread-block scheduling ///////////////////////////////////////
     //
@@ -350,16 +353,26 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
       __syncthreads();
     }
 
-    /// FINALLY: fine-grained parallelism /////////////////////////////////////
+    /// FINALLY: fine-grained schedule ////////////////////////////////////////
     __syncthreads();
+    // Store total fine-grained work left to do into this thread's _np object
     _np.total = _np_mps_total.el[1];
     _np.offset = _np_mps.el[1];
+    // Run while there is any fine-grained work left to do
     while (_np.work())
     {
       int _np_i =0;
+      // Load as many of my edges as fit into nps.fg.itvalue (basically,
+      // if there are lots of threads wanting to do fine-grained parallelism,
+      // mine might not fit).
+      // (if looking at inspect in include.h, _np.my_done is initialized to 0.
+      //  As done decreases during each loop, (offset-done) will eventually
+      //  be less than ITSIZE, at which point this thread gets to start putting
+      //  its fine-graned scheduled edges on the nps.fg.itvalue array)
       _np.inspect(nps.fg.itvalue, ITSIZE);
       __syncthreads();
 
+      // Now parallelize in block over all fine-grained threads
       for (_np_i = threadIdx.x; _np_i < ITSIZE && _np.valid(_np_i); _np_i += BLKSIZE)
       {
         index_type edge;
@@ -376,6 +389,7 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
           }
         }
       }
+      // This is where we record the amount of work done by this block
       _np.execute_round_done(ITSIZE);
       __syncthreads();
     }
