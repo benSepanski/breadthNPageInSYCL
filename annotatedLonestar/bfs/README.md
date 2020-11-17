@@ -235,6 +235,8 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
     _np_mps.el[0] = _np.size >= _NP_CROSSOVER_WP ? _np.size : 0;
     _np_mps.el[1] = _np.size < _NP_CROSSOVER_WP ? _np.size : 0;
     BlockScan(nps.temp_storage).ExclusiveSum(_np_mps, _np_mps, _np_mps_total);
+    // FIRST: do thread-block scheduling ///////////////////////////////////////
+    //
     // nps.tb.owner is the nested-parallelism thread-block owner.
     // Different threads will compete for thread-block ownership until
     // all threads have had a chance to get their inner loop handled
@@ -299,15 +301,24 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
       __syncthreads();
     }
 
+    /// NEXT: Do warp-scheduling //////////////////////////////////////////////
     {
-      const int warpid = threadIdx.x / 32;
-      const int _np_laneid = cub::LaneId();
+      const int warpid = threadIdx.x / 32;   // warp identifier
+      const int _np_laneid = cub::LaneId();  // pos of thread in warp https://nvlabs.github.io/cub/group___util_ptx.html
+      // The any_sync makes sure that if any thread needs to handle
+      // some of its inner loop using a warp-schedule, then all threads
+      // enter this loop. This ensures that no thread deadlocks on a barrier
+      // that another thread fails to encounter.
+      // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#simt-architecture__notes
       while (__any_sync(0xffffffff,_np.size >= _NP_CROSSOVER_WP && _np.size < _NP_CROSSOVER_TB))
       {
+        // If is of warp-schedule size, compete for ownership
         if (_np.size >= _NP_CROSSOVER_WP && _np.size < _NP_CROSSOVER_TB)
         {
           nps.warp.owner[warpid] = _np_laneid;
         }
+        // One would expect a syncthreads here, but due to warp synchronization
+        // we don't need one.
         if (nps.warp.owner[warpid] == _np_laneid)
         {
           nps.warp.start[warpid] = _np.start;
@@ -316,6 +327,7 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
           _np.start = 0;
           _np.size = 0;
         }
+        // Distribute inner loop across warp
         index_type _np_w_start = nps.warp.start[warpid];
         index_type _np_w_size = nps.warp.size[warpid];
         for (int _np_ii = _np_laneid; _np_ii < _np_w_size; _np_ii += 32)
@@ -338,6 +350,7 @@ __device__ void bfs_kernel_dev(CSRGraph graph, int LEVEL, bool enable_lb, Workli
       __syncthreads();
     }
 
+    /// FINALLY: fine-grained parallelism /////////////////////////////////////
     __syncthreads();
     _np.total = _np_mps_total.el[1];
     _np.offset = _np_mps.el[1];
