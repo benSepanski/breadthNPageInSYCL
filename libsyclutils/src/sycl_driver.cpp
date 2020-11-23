@@ -27,7 +27,7 @@
 #include "nvidia_selector.h"
 
 // Application-implemented functions
-extern int sycl_main(Host_CSR_Graph&, cl::sycl::device_selector&);
+extern int sycl_main(Host_CSR_Graph&, cl::sycl::queue&);
 extern void output(Host_CSR_Graph&, const char *output_file);
 
 int QUIET = 0;
@@ -54,10 +54,32 @@ int load_graph_and_run_kernel(char *graph_file, cl::sycl::device_selector &dev_s
       std::exit(1);
   }
 
+  // Build an exception handler for the command queue as in
+  // https://developer.codeplay.com/products/computecpp/ce/guides/sycl-guide/error-handling
+  auto exception_handler = [] (cl::sycl::exception_list exceptions) {
+     for (std::exception_ptr const& e : exceptions) {
+       try {
+         std::rethrow_exception(e);
+       } catch(cl::sycl::exception const& e) {
+         std::cerr << "Caught asynchronous SYCL exception:\n" << e.what() << std::endl;
+         if(e.get_cl_code() != CL_SUCCESS) {
+             std::cerr << "OpenCL error code " << e.get_cl_code() << std::endl;
+         }
+         std::exit(1);
+       }
+     }
+  };
+  // Build command queue with profiling enabled and report the device
+   cl::sycl::property::queue::enable_profiling enab_prof;
+   cl::sycl::property_list prop_list(enab_prof);
+   cl::sycl::queue queue(dev_sel, exception_handler, prop_list);
+   fprintf(stderr, "Running on %s\n",
+           queue.get_device().get_info<cl::sycl::info::device::name>().c_str());
+
   // Run application
-  auto startTime = std::chrono::system_clock::now();
-  int r = sycl_main(host_graph, dev_sel);
-  auto endTime = std::chrono::system_clock::now();
+  auto startTime = std::chrono::high_resolution_clock::now();
+  int r = sycl_main(host_graph, queue);
+  auto endTime = std::chrono::high_resolution_clock::now();
 
   // Report time
   double time_in_ms = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
