@@ -35,6 +35,9 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selecto
           std::rethrow_exception(e);
         } catch(cl::sycl::exception const& e) {
           std::cerr << "Caught asynchronous SYCL exception:\n" << e.what() << std::endl;
+          if(e.get_cl_code() != CL_SUCCESS) {
+              std::cerr << "OpenCL error code " << e.get_cl_code() << std::endl;
+          }
           std::exit(1);
         }
       }
@@ -95,6 +98,7 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selecto
               // Determine number of groups
               const uint32_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE;
               uint32_t NUM_WORK_GROUPS = (in_worklist_size + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE;
+              const uint32_t GROUP_LOCAL_QUEUE_SIZE = 16 * THREAD_BLOCK_SIZE;
 
               // get accessors
               auto row_start_acc = sycl_graph.row_start.get_access<cl::sycl::access::mode::read>(cgh);
@@ -108,115 +112,120 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selecto
 
               // Give each group a group-local queue
               cl::sycl::accessor<index_type, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::local>
-                    group_local_queue_acc(cl::sycl::range<1>{WORK_GROUP_SIZE}, cgh);
+                    group_local_queue_acc(cl::sycl::range<1>{GROUP_LOCAL_QUEUE_SIZE}, cgh);
 
               // put the bfs iter on the command queue
               cgh.parallel_for_work_group<class bfs_iter>(cl::sycl::range<1>{NUM_WORK_GROUPS},
                                                           cl::sycl::range<1>{WORK_GROUP_SIZE},
                 [=] (cl::sycl::group<1> my_group) {
+                    // Give each work-item private memory in which to store its node
+                    cl::sycl::private_memory<index_type> my_node(my_group),
+                                                         my_first_edge(my_group),
+                                                         my_last_edge(my_group),
+                                                         my_work_left(my_group);
+                    /// Have each work-item figure out the node it needs to work on (if any) ////////////////
+                    my_group.parallel_for_work_item( [&] (cl::sycl::h_item<1> local_item) {
+                        if(local_item.get_global_id()[0] < in_worklist_size) {
+                            size_t id = local_item.get_global_id()[0];
+                            my_node(local_item) = in_worklist_acc[id];
+                            // THESE TWO CALLS RETURNS AN LVALUE REFERENCE!
+                            my_first_edge(local_item) = row_start_acc[id];
+                            my_last_edge(local_item) = row_start_acc[id+1];
+                            my_work_left(local_item) = my_last_edge(local_item) - my_first_edge(local_item);
+                        }
+                        else {
+                            my_node(local_item) = WORK_GROUP_SIZE;
+                            my_first_edge(local_item) = INF;
+                            my_last_edge(local_item) = INF;
+                            my_work_left(local_item) = 0;
+                        }
+                    });
+                    /////////////////////////////////////////////////////////////////////////////////////////
+                    //
                     // initialize work_node to an invalid group id
                     size_t work_node = WORK_GROUP_SIZE, prev_work_node;
-
-                    // Have each work-item figure out the node it needs to work on (if any)
-                    cl::sycl::private_memory<index_type> my_node(my_group);
-                    my_group.parallel_for_work_item(cl::sycl::range<1>{WORK_GROUP_SIZE},
-                        [&] (cl::sycl::h_item<1> local_item) {
-                            if(local_item.get_global_id()[0] < in_worklist_size) {
-                                my_node(local_item) = in_worklist_acc[local_item.get_global_id()];
-                            }
-                            else {
-                                my_node(local_item) = WORK_GROUP_SIZE;
-                            }
-                        });
-
-                    // Now do work in my group until nobody in my group has work left
-                    // to do
+                    /// Now collaborate as a group until everyone's work is done ////////////////////////////
                     while(true) {
                         prev_work_node = work_node;
-                        // Compete for the work_node
-                        my_group.parallel_for_work_item(cl::sycl::range<1>{WORK_GROUP_SIZE},
-                            [&](cl::sycl::h_item<1> local_item) {
-                                // if I got to be the work-node last time, my_node is complete
-                                if(my_node(local_item) == work_node) {
-                                    my_node(local_item) = WORK_GROUP_SIZE;
-                                }
-                                else if(my_node(local_item) != WORK_GROUP_SIZE) {
-                                    work_node = my_node(local_item);
-                                }
-                            });
-                        // If nobody claimed the work node, we're done!
-                        if(work_node == prev_work_node) break;
-                        sycl_stream << "work_node=" << work_node << cl::sycl::endl;
-
-                        // get the first edge and out-degree
-                        index_type first_edge = row_start_acc[work_node],
-                                   last_edge = row_start_acc[work_node+1];
-
-                        // Now distribute work on the work_node's out edges across this group
-                        // in blocks of size WORK_GROUP_SIZE
-                        while(first_edge < last_edge) {
-                            // empty the group-local queue
-                            size_t group_local_queue_size = 0,
-                                   group_queue_owner = WORK_GROUP_SIZE,
-                                   group_queue_owner_check = WORK_GROUP_SIZE;
-                            // get number of edges to work on edges
-                            size_t group_size = WORK_GROUP_SIZE;
-                            if(group_size > last_edge - first_edge) {
-                                group_size = last_edge - first_edge;
+                        /// Compete for the work node /////////////////////////////////////////////
+                        my_group.parallel_for_work_item( [&] (cl::sycl::h_item<1> local_item) {
+                            // If I got work_node last time, my work is done
+                            if( my_node(local_item) == prev_work_node ) {
+                                my_node(local_item) = WORK_GROUP_SIZE;
+                                my_work_left(local_item) = 0;
                             }
-                            sycl_stream << "grp size = " << group_size << cl::sycl::endl;
-                            // work on those edges
-                            my_group.parallel_for_work_item(cl::sycl::range<1>{group_size}, [&](cl::sycl::h_item<1> local_item) {
-                                index_type edge_index = first_edge + local_item.get_local_id()[0];
-                                index_type edge_dst = edge_dst_acc[edge_index];
-                                // Update node data if closer
+                            else if( my_work_left(local_item) != 0) {
+                                work_node = my_node(local_item);
+                            }
+                        });
+                        ///////////////////////////////////////////////////////////////////////////
+                        //
+                        // If no-one competed for the work-node, we're done!
+                        if(prev_work_node == work_node) {
+                            break;
+                        }
+                        //
+                        // Figure out the index range of the out-edges the work_node
+                        index_type first_edge, last_edge, degree, first_edge_copy; 
+                        my_group.parallel_for_work_item([&] (cl::sycl::h_item<1> local_item) {
+                            if(work_node == my_node(local_item)) {
+                                first_edge = my_first_edge(local_item);
+                                last_edge  = my_last_edge(local_item);
+                            }
+                        });
+                        degree = last_edge - first_edge;
+                        first_edge_copy = first_edge;
+                        /// Now work on the work-node /////////////////////////////////////////////
+                        //
+                        // Build an atomic group-local queue size and set it to zero
+                        cl::sycl::multi_ptr<uint32_t, cl::sycl::access::address_space::local_space> group_local_queue_size_ptr;
+                        cl::sycl::atomic<uint32_t, cl::sycl::access::address_space::local_space> at_group_local_queue_size(group_local_queue_size_ptr);
+                        at_group_local_queue_size.store(0);
+                        /// now work on the edges in batches of size WORK_GROUP_SIZE ////
+                        while(first_edge_copy < last_edge) {
+                            // figure out batch size
+                            size_t batch_size = WORK_GROUP_SIZE;
+                            if(batch_size > last_edge - first_edge_copy) {
+                                batch_size = last_edge - first_edge_copy;
+                            }
+                            /// Work on this batch of edges ///////////////////
+                            my_group.parallel_for_work_item(cl::sycl::range<1>{batch_size},
+                            [&] (cl::sycl::h_item<1> local_item) {
+                                index_type edge_index = first_edge_copy + local_item.get_local_id()[0];
+                                index_type edge_dst = edge_dst_acc[edge_index];  // THIS RETURNS AN LVALUE REFERENCE!
                                 if( node_data_acc[edge_dst] == INF ) {
-                                    node_data_acc[edge_dst] = LEVEL ;
-                                    // Compete for ownership of the group-queue
-                                    /*
-                                    do {
-                                        // get pending approval by writing to the check
-                                        if(group_queue_owner == WORK_GROUP_SIZE && group_queue_owner_check == WORK_GROUP_SIZE) {
-                                            group_queue_owner_check = local_item.get_local_id()[0];
-                                        }
-                                        // make sure anyone that writes to the check or owner commits their write
-                                        // before the upcoming read
-                                        my_group.mem_fence(cl::sycl::access::fence_space::local_space);
-                                        // If we received pending approval and no-one got approval,
-                                        // take full control
-                                        if(group_queue_owner == WORK_GROUP_SIZE && group_queue_owner_check == local_item.get_local_id()[0]) {
-                                            group_queue_owner = local_item.get_local_id()[0];
-                                        }
-                                        // make sure these read/writes get committed before the upcoming read
-                                        my_group.mem_fence(cl::sycl::access::fence_space::local_space);
-                                    } while(group_queue_owner != local_item.get_local_id()[0]);
-                                    */
-                                    // Now put what you want on the queue
+                                    node_data_acc[edge_dst] = LEVEL;
+                                    uint32_t group_local_queue_size = at_group_local_queue_size.fetch_add(1);
                                     group_local_queue_acc[group_local_queue_size] = edge_dst;
-                                    group_local_queue_size++;
-                                    // relinquish control of group-local queue
-                                    group_queue_owner = WORK_GROUP_SIZE;
-                                    group_queue_owner_check = WORK_GROUP_SIZE;
+                                    //index_type wl_size = out_worklist_size_acc[0].fetch_add(1);
+                                    //out_worklist_acc[wl_size] = edge_dst;
                                 }
                             });
-
-
-                            // Now load the group-local queue onto the queue
-                            /*
-                            uint32_t offset = out_worklist_size_acc[0].fetch_add(group_local_queue_size);
-                            my_group.parallel_for_work_item(cl::sycl::range<1>{group_local_queue_size},
+                            uint32_t group_local_queue_size = at_group_local_queue_size.load();
+                            first_edge_copy += batch_size;
+                            if(group_local_queue_size > GROUP_LOCAL_QUEUE_SIZE - WORK_GROUP_SIZE || first_edge_copy >= last_edge) {
+                                at_group_local_queue_size.store(0);
+                                uint32_t offset = out_worklist_size_acc[0].fetch_add(group_local_queue_size);
+                                my_group.parallel_for_work_item(cl::sycl::range<1>{group_local_queue_size},
                                 [&] (cl::sycl::h_item<1> local_item) {
-                                    out_worklist_acc[offset + local_item.get_local_id()[0]] = group_local_queue_acc[local_item.get_local_id()[0]];
+                                    size_t id = local_item.get_local_id()[0];
+                                    out_worklist_acc[offset + id] = group_local_queue_acc[id];
                                 });
-                            */
-                            // Now move firstEdge forward
-                            first_edge += group_size;
+                            }
+                            ///////////////////////////////////////////////////
+                            //first_edge_copy += batch_size;
                         }
-                     }
+                        /////////////////////////////////////////////////////////////////
+                        //
+                        ///////////////////////////////////////////////////////////////////////////
+                    }
                  });
              });
           } catch (cl::sycl::exception const& e) {
               std::cerr << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+            if(e.get_cl_code() != CL_SUCCESS) {
+                std::cerr << "OpenCL error code " << e.get_cl_code() << std::endl;
+            }
               std::exit(1);
           }
 
@@ -225,7 +234,10 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selecto
           try {
             queue.wait_and_throw();
           } catch (cl::sycl::exception const& e) {
-            std::cerr << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+            std::cerr << "Caught asynchronous SYCL exception:\n" << e.what() << std::endl;
+            if(e.get_cl_code() != CL_SUCCESS) {
+                std::cerr << "OpenCL error code " << e.get_cl_code() << std::endl;
+            }
             std::exit(1);
           }
 
