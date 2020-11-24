@@ -22,26 +22,7 @@ extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
 class bfs_init;
 class bfs_iter;
 
-int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::device_selector &dev_selector) {
-   // From https://developer.codeplay.com/products/computecpp/ce/guides/sycl-guide/error-handling
-   // to catch asynchronous exceptions
-   auto exception_handler = [] (cl::sycl::exception_list exceptions) {
-      for (std::exception_ptr const& e : exceptions) {
-        try {
-          std::rethrow_exception(e);
-        } catch(cl::sycl::exception const& e) {
-          std::cerr << "Caught asynchronous SYCL exception:\n" << e.what() << std::endl;
-          std::exit(1);
-        }
-      }
-    };
-
-   // Build our queue and report device
-   cl::sycl::queue queue(dev_selector, exception_handler);
-   std::cerr << "Running on "
-             << queue.get_device().get_info<cl::sycl::info::device::name>()
-             << "\n";
-
+int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::queue &queue) {
    // copy start_node into local variable so we can use it inside SYCL kernels
    const index_type START_NODE = start_node;
 
