@@ -5,9 +5,7 @@
 
 // From libsyclutils
 //
-// Host_CSR_Graph index_type node_data_type
-#include "host_csr_graph.h"
-// SYCL_CSR_Graph
+// SYCL_CSR_Graph index_type node_data_type
 #include "sycl_csr_graph.h"
 
 // from support.cpp
@@ -21,16 +19,12 @@ extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
 class bfs_init;
 class bfs_iter;
 
-int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::queue &queue) {
+int sycl_main(SYCL_CSR_Graph &sycl_graph, cl::sycl::queue &queue) {
    // copy start_node into local variable so we can use it inside SYCL kernels
    const index_type START_NODE = start_node;
 
    // SYCL Scope
    {
-      // Build our sycl graph inside scope so that buffers can be destroyed
-      // by destructor
-      SYCL_CSR_Graph sycl_graph(&host_graph);
-
       try {
           // Set node data to INF or 0 (if it's src node)
           queue.submit([&] (cl::sycl::handler& cgh) {

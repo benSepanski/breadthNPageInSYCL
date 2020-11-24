@@ -6,9 +6,7 @@
 
 // From libsyclutils
 //
-// Host_CSR_Graph index_type node_data_type
-#include "host_csr_graph.h"
-// SYCL_CSR_Graph
+// SYCL_CSR_Graph node_data_type index_type
 #include "sycl_csr_graph.h"
 
 // easier than typing cl::sycl
@@ -236,26 +234,17 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
 }
 
 
-int sycl_main(Host_CSR_Graph &host_graph, sycl::queue &queue) {
-   // copy start_node into local variable so we can use it inside SYCL kernels
-   const index_type START_NODE = start_node;
+int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
+    // Run sycl bfs in a try-catch block.
+    try {
+        sycl_bfs(sycl_graph, queue);
+    } catch (cl::sycl::exception const& e) {
+        std::cerr << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+        if(e.get_cl_code() != CL_SUCCESS) {
+            std::cerr << "OpenCL error code " << e.get_cl_code() << std::endl;
+        }
+        std::exit(1);
+    }
 
-   // SYCL Scope
-   {
-      // Build our sycl graph inside scope so that buffers can be destroyed
-      // by destructor
-      SYCL_CSR_Graph sycl_graph(&host_graph);
-
-      try {
-          sycl_bfs(sycl_graph, queue);
-      } catch (cl::sycl::exception const& e) {
-          std::cerr << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
-          if(e.get_cl_code() != CL_SUCCESS) {
-              std::cerr << "OpenCL error code " << e.get_cl_code() << std::endl;
-          }
-          std::exit(1);
-      }
-   } // End SYCL Scope
-
-   return 0;
+    return 0;
 }

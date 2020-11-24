@@ -23,11 +23,13 @@
 //
 // Host_CSR_Graph
 #include "host_csr_graph.h"
+// SYCL_CSR_Graph
+#include "sycl_csr_graph.h"
 // NVIDIA_Selector
 #include "nvidia_selector.h"
 
 // Application-implemented functions
-extern int sycl_main(Host_CSR_Graph&, cl::sycl::queue&);
+extern int sycl_main(SYCL_CSR_Graph&, cl::sycl::queue&);
 extern void output(Host_CSR_Graph&, const char *output_file);
 
 int QUIET = 0;
@@ -45,55 +47,102 @@ extern int process_prog_arg(int argc, char *argv[], int arg_start);
 
 
 int load_graph_and_run_kernel(char *graph_file, cl::sycl::device_selector &dev_sel) {
-  // read in graph
-  Host_CSR_Graph host_graph;
-  host_graph.readFromGR(graph_file);
-  // Make sure the graph doesn't have more than 32 bits of nodes
-  if(host_graph.nnodes >= std::numeric_limits<uint32_t>::max()) {
-      printf("SYCL targeting ptx (NVIDIA) does not support 64-bit atomics. num nodes must be < uint32_max");
-      std::exit(1);
-  }
-
-  // Build an exception handler for the command queue as in
-  // https://developer.codeplay.com/products/computecpp/ce/guides/sycl-guide/error-handling
-  auto exception_handler = [] (cl::sycl::exception_list exceptions) {
-     for (std::exception_ptr const& e : exceptions) {
-       try {
-         std::rethrow_exception(e);
-       } catch(cl::sycl::exception const& e) {
-         std::cerr << "Caught asynchronous SYCL exception:\n" << e.what() << std::endl;
-         if(e.get_cl_code() != CL_SUCCESS) {
-             std::cerr << "OpenCL error code " << e.get_cl_code() << std::endl;
-         }
+     // read in graph
+     Host_CSR_Graph host_graph;
+     host_graph.readFromGR(graph_file);
+     // Make sure the graph doesn't have more than 32 bits of nodes
+     if(host_graph.nnodes >= std::numeric_limits<uint32_t>::max()) {
+         printf("SYCL targeting ptx (NVIDIA) does not support 64-bit atomics. num nodes must be < uint32_max");
          std::exit(1);
-       }
      }
-  };
-  // Build command queue with profiling enabled and report the device
-   cl::sycl::property::queue::enable_profiling enab_prof;
-   cl::sycl::property_list prop_list(enab_prof);
-   cl::sycl::queue queue(dev_sel, exception_handler, prop_list);
-   fprintf(stderr, "Running on %s\n",
-           queue.get_device().get_info<cl::sycl::info::device::name>().c_str());
+   
+     // Build an exception handler for the command queue as in
+     // https://developer.codeplay.com/products/computecpp/ce/guides/sycl-guide/error-handling
+    auto exception_handler = [] (cl::sycl::exception_list exceptions) {
+        for (std::exception_ptr const& e : exceptions) {
+            try {
+                std::rethrow_exception(e);
+            } catch(cl::sycl::exception const& e) {
+                std::cerr << "Caught asynchronous SYCL exception:\n" << e.what() << std::endl;
+                if(e.get_cl_code() != CL_SUCCESS) {
+                std::cerr << "OpenCL error code " << e.get_cl_code() << std::endl;
+                }
+                std::exit(1);
+            }
+        }
+    };
+// Begin SYCL scope
+    // return value declared outside of SYCL scope
+    int r;
+    // Begin SYCL scope
+    {
+        // Build command queue with profiling enabled and report the device
+        cl::sycl::property::queue::enable_profiling enab_prof;
+        cl::sycl::property_list prop_list(enab_prof);
+        cl::sycl::queue queue(dev_sel, exception_handler, prop_list);
+        fprintf(stderr, "Running on %s\n",
+                queue.get_device().get_info<cl::sycl::info::device::name>().c_str());
 
-  // Run application
-  auto startTime = std::chrono::high_resolution_clock::now();
-  int r = sycl_main(host_graph, queue);
-  auto endTime = std::chrono::high_resolution_clock::now();
 
-  // Report time
-  double time_in_ms = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
-  double time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime).count();
-  fprintf(stderr, "Total time: %u ms\n", (uint64_t) time_in_ms);
-  fprintf(stderr, "Total time: %u ns\n", (uint64_t) time_in_ns);
+        // Create SYCL graph
+        SYCL_CSR_Graph sycl_graph(&host_graph);
 
-  // Finish
-  if(!QUIET)
-    output(host_graph, OUTPUT);
-
-  return r;
+        // Explicitly copy graph onto device
+        try{
+            queue.submit([&] (cl::sycl::handler &cgh) {
+                auto row_start_host = sycl_graph.row_start.get_access<
+                                        cl::sycl::access::mode::read>(cgh);
+                auto row_start_dev = sycl_graph.row_start.get_access<
+                                        cl::sycl::access::mode::read_write,
+                                        cl::sycl::access::target::global_buffer>(cgh);
+                cgh.copy(row_start_host, row_start_dev);
+            });
+            queue.submit([&] (cl::sycl::handler &cgh) {
+                auto edge_dst_host = sycl_graph.edge_dst.get_access<
+                                        cl::sycl::access::mode::read>(cgh);
+                auto edge_dst_dev = sycl_graph.edge_dst.get_access<
+                                        cl::sycl::access::mode::read_write,
+                                        cl::sycl::access::target::global_buffer>(cgh);
+                cgh.copy(edge_dst_host, edge_dst_dev);
+            });
+            queue.submit([&] (cl::sycl::handler &cgh) {
+                auto node_data_host = sycl_graph.node_data.get_access<
+                                        cl::sycl::access::mode::read>(cgh);
+                auto node_data_dev = sycl_graph.node_data.get_access<
+                                        cl::sycl::access::mode::read_write,
+                                        cl::sycl::access::target::global_buffer>(cgh);
+                cgh.copy(node_data_host, node_data_dev);
+            });
+        } catch(cl::sycl::exception const& e) {
+            std::cerr << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
+            if(e.get_cl_code() != CL_SUCCESS) {
+            std::cerr << "OpenCL error code " << e.get_cl_code() << std::endl;
+            }
+            std::exit(1);
+        }
+        // wait for copy to finish, throwing asynchronous exception to
+        // handler if one is found
+        queue.wait_and_throw();
+ 
+        // Run application
+        auto startTime = std::chrono::high_resolution_clock::now();
+        r = sycl_main(sycl_graph, queue);
+        auto endTime = std::chrono::high_resolution_clock::now();
+ 
+        // Report time
+        double time_in_ms = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+        double time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime).count();
+        fprintf(stderr, "Total time: %u ms\n", (uint64_t) time_in_ms);
+        fprintf(stderr, "Total time: %u ns\n", (uint64_t) time_in_ns);
+    } // end sycl scope
+  
+   // Finish
+   if(!QUIET)
+     output(host_graph, OUTPUT);
+ 
+   return r;
 }
-
+ 
 void usage(int argc, char *argv[]) 
 {
   if(strlen(prog_usage)) 
