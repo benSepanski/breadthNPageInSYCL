@@ -5,7 +5,7 @@
 
 // From libsyclutils
 //
-// Host_CSR_Graph index_type
+// Host_CSR_Graph index_type node_data_type
 #include "host_csr_graph.h"
 // SYCL_CSR_Graph
 #include "sycl_csr_graph.h"
@@ -13,7 +13,6 @@
 // from support.cpp
 extern index_type start_node;
 
-typedef uint64_t node_data_type;
 // defined here, but const so need to declare as extern so support.cpp
 // can use it
 extern const uint64_t INF = std::numeric_limits<uint64_t>::max();

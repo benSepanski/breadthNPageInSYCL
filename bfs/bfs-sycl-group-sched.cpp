@@ -91,23 +91,31 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
             out_worklist_size[0] = 0;
         });
     });
+    // For some reason, sycl does not wait for the initialization to finish
+    // before starting the iters, so force it to wait explicitly
+    queue.wait();
     /////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // Get work_group_size onto device to avoid copies
+    // Get some work-distribution constants onto device to avoid copies
     const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE;
     sycl::buffer<const size_t, 1> WORK_GROUP_SIZE_buf(&WORK_GROUP_SIZE, sycl::range<1>{1});
+    const size_t MIN_GROUP_SCHED_DEGREE = 1;
+    sycl::buffer<const size_t, 1> MIN_GROUP_SCHED_DEGREE_buf(&MIN_GROUP_SCHED_DEGREE, sycl::range<1>{1});
     /// Now invoke BFS routine at each level ////////////////////////////////////////////////////////////////
     size_t level = 1, level_host_copy = 1, in_worklist_size_host_copy = 1;
     sycl::buffer<size_t, 1> LEVEL_buf(&level, sycl::range<1>{1});
     do {
         /// Run an iteration of BFS ///////////////////////////////////////////////////////////////
         queue.submit([&] (sycl::handler &cgh) {
+            sycl::stream sycl_stream(1024, 256, cgh);
             // constants for work distribution
             const size_t NUM_WORK_GROUPS = (in_worklist_size_host_copy + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE;
 
-            // get constant access to work-group size on device
+            // get constant access to some work-distribution constantss size on device
             auto WORK_GROUP_SIZE_acc = WORK_GROUP_SIZE_buf.get_access<sycl::access::mode::read,
                                                                       sycl::access::target::constant_buffer>(cgh);
+            auto MIN_GROUP_SCHED_DEGREE_acc = MIN_GROUP_SCHED_DEGREE_buf.get_access<sycl::access::mode::read,
+                                                                                    sycl::access::target::constant_buffer>(cgh);
             // Get read-access to the CSR graph
             auto row_start = sycl_graph.row_start.get_access<sycl::access::mode::read>(cgh);
             auto edge_dst  = sycl_graph.edge_dst.get_access<sycl::access::mode::read>(cgh);
@@ -122,40 +130,78 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
             auto in_worklist = in_worklist_buf->get_access<sycl::access::mode::read>(cgh);
             auto IN_WORKLIST_SIZE = in_worklist_size_buf.get_access<sycl::access::mode::read,
                                                                     sycl::access::target::constant_buffer>(cgh);
+            auto LEVEL = LEVEL_buf.get_access<sycl::access::mode::read,
+                                              sycl::access::target::constant_buffer>(cgh);
             // We need to (discard) write to the out-worklist and its size
             auto out_worklist = out_worklist_buf->get_access<sycl::access::mode::discard_write>(cgh);
             auto out_worklist_size = out_worklist_size_buf.get_access<sycl::access::mode::atomic>(cgh);
+
+            // Give each group some local memory for nodes to store their first/last edges
+            cl::sycl::accessor<index_type, 1,
+                               sycl::access::mode::read_write,
+                               sycl::access::target::local> 
+                                   group_first_edge(sycl::range<1>{WORK_GROUP_SIZE}, cgh),
+                                   group_last_edge(sycl::range<1>{WORK_GROUP_SIZE}, cgh),
+                                   group_work_done(sycl::range<1>{WORK_GROUP_SIZE}, cgh);
 
             /// Now submit our bfs job //////////////////////////////////////////////////
             cgh.parallel_for_work_group<class bfs_iter>(sycl::range<1>{NUM_WORK_GROUPS}, sycl::range<1>{WORK_GROUP_SIZE},
             [=] (sycl::group<1> my_group) {
                 // Have each node in my group figure out what work it needs to do (if any)
-                sycl::private_memory<index_type> my_node(my_group),
-                                                 my_first_edge(my_group),
-                                                 my_last_edge(my_group),
-                                                 my_work_left(my_group);
+                sycl::private_memory<index_type> my_work_left(my_group);
                 my_group.parallel_for_work_item([&] (sycl::h_item<1> my_item) {
                     sycl::id<1> global_id = my_item.get_global_id();
+                    my_work_left(my_item) = 0;
                     if(global_id[0] < IN_WORKLIST_SIZE[0]) {
-                        my_node(my_item) = in_worklist[global_id];
-                        my_first_edge(my_item) = row_start[my_node(my_item)];
-                        my_last_edge(my_item) = row_start[my_node(my_item)+1];
+                        // get my src node, first edge, and last edge in private memory
+                        index_type my_node = in_worklist[global_id],
+                                   first_edge = row_start[my_node],
+                                    last_edge = row_start[my_node+1];
+                        // put first/last edge into local memory
+                        sycl::id<1> local_id = my_item.get_local_id();
+                        group_first_edge[local_id] = first_edge;
+                        group_last_edge[local_id] = last_edge;
+                        group_work_done[local_id] = 0;
+                        // store the work I have left to do in private memory
+                        my_work_left(my_item) = last_edge - first_edge;
                     }
-                    else {
-                        my_node(my_item) = INF;
-                        my_first_edge(my_item) = INF;
-                        my_last_edge(my_item) = INF;
-                    }
-                    my_work_left(my_item) = my_last_edge(my_item) - my_first_edge(my_item);
                 });
                 /// group-scheduling //////////////////////////////////////////
                 //(work as group til no one wants group control)
                 index_type prev_work_node, work_node = WORK_GROUP_SIZE_acc[0];
                 while(true) {
                     prev_work_node = work_node;
+                    // Compete for control of group
+                    my_group.parallel_for_work_item([&](sycl::h_item<1> my_item) {
+                        // If I got control last time, I have no work to do
+                        if(prev_work_node == my_item.get_local_id()[0]) {
+                            my_work_left(my_item) = 0;
+                        }
+                        // If I have enough work to do that I want to control the
+                        // whole group, bid for control!
+                        if( my_work_left(my_item) >= MIN_GROUP_SCHED_DEGREE_acc[0] ) {
+                            work_node = my_item.get_local_id()[0];
+                        }
+                    });
                     // If no-one competed for control of the group, we're done!
                     if(prev_work_node == work_node) {
                         break;
+                    }
+                    // Now work on the work_node's out-edges in batches of
+                    // size WORK_GROUP_SIZE
+                    size_t work_todo = group_last_edge[work_node] - group_first_edge[work_node];
+                    while( group_work_done[work_node] < work_todo ) {
+                        const size_t batch_size = sycl::min(WORK_GROUP_SIZE_acc[0], work_todo - group_work_done[work_node]);
+                        index_type offset = group_first_edge[work_node] + group_work_done[work_node];
+                        my_group.parallel_for_work_item(sycl::range<1>{batch_size},
+                        [&] (sycl::h_item<1> my_item) {
+                            index_type edge_index = offset + my_item.get_local_id()[0],
+                                        dst_node = edge_dst[edge_index];
+                            if( node_level[dst_node] == INF_acc[0] ) {
+                                node_level[dst_node] = LEVEL[0];
+                            }
+                        });
+                        group_work_done[work_node] += batch_size;
                     }
                 }
                 ///////////////////////////////////////////////////////////////
