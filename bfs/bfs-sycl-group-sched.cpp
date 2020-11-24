@@ -30,8 +30,7 @@ extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
 #define WARP_SIZE 32
 
 // classes used to name SYCL kernels
-class node_level_inf;
-class init_start_node;
+class bfs_init;
 class bfs_iter;
 
 
@@ -60,25 +59,13 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     gpu_size_t in_worklist_size;
     sycl::buffer<gpu_size_t, 1> in_worklist_size_buf(&in_worklist_size, sycl::range<1>{1}),
                                 out_worklist_size_buf(sycl::range<1>{1});
-    // set all levels to INF
+    // initialize node levels and worklists
     queue.submit([&] (sycl::handler &cgh) {
         // get access to node level
         auto node_level = sycl_graph.node_data.get_access<sycl::access::mode::discard_write>(cgh);
         // get INF on the device
         auto INF_acc = INF_buf.get_access<sycl::access::mode::read,
                                           sycl::access::target::constant_buffer>(cgh);
-        // Set all node levels to INF
-        const size_t BFS_INIT_WORK_GROUP_SIZE = std::min((size_t) THREAD_BLOCK_SIZE, (size_t) NNODES);
-        cgh.parallel_for<class node_level_inf>(sycl::nd_range<1>{sycl::range<1>{NNODES},
-                                                                 sycl::range<1>{BFS_INIT_WORK_GROUP_SIZE}},
-        [=](sycl::nd_item<1> my_item) {
-            node_level[my_item.get_global_id()] = INF_acc[0];
-        });
-    });
-    // Set source node level to 0 and initialize worklists
-    queue.submit([&] (sycl::handler &cgh) {
-        // write to node level
-        auto node_level = sycl_graph.node_data.get_access<sycl::access::mode::write>(cgh);
         // dicard-write to in_worklist
         auto in_worklist = in_worklist_buf->get_access<sycl::access::mode::discard_write>(cgh);
         // need access to start node and worklist sizes
@@ -86,9 +73,12 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                                                         sycl::access::target::constant_buffer>(cgh);
         auto in_worklist_size = in_worklist_size_buf.get_access<sycl::access::mode::discard_write>(cgh);
         auto out_worklist_size = out_worklist_size_buf.get_access<sycl::access::mode::discard_write>(cgh);
-        // set source node level to 0 and initialize worklists
-        cgh.single_task<class init_start_node>([=]() {
-            node_level[START_NODE_acc[0]] = 0;
+        // Initialize the node data
+        const size_t BFS_INIT_WORK_GROUP_SIZE = std::min((size_t) THREAD_BLOCK_SIZE, (size_t) NNODES);
+        cgh.parallel_for<class bfs_init>(sycl::nd_range<1>{sycl::range<1>{NNODES},
+                                                           sycl::range<1>{BFS_INIT_WORK_GROUP_SIZE}},
+        [=](sycl::nd_item<1> my_item) {
+            node_level[my_item.get_global_id()] = (my_item.get_global_id()[0] == START_NODE_acc[0]) ? 0 : INF_acc[0];
             in_worklist[0] = START_NODE_acc[0];
             in_worklist_size[0] = 1;
             out_worklist_size[0] = 0;
