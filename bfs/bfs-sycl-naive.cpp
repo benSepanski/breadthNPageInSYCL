@@ -73,7 +73,7 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::queue &queue) {
       while( in_worklist_size > 0 && level < INF) {
           // run an iteration of bfs at the given level
           try {
-          cl::sycl::event bfs_iter_event = queue.submit([&] (cl::sycl::handler &cgh) {
+              cl::sycl::event bfs_iter_event = queue.submit([&] (cl::sycl::handler &cgh) {
               cl::sycl::stream sycl_stream(1024, 256, cgh);
               // save current level in command group
               const node_data_type LEVEL = level;
@@ -86,7 +86,8 @@ int sycl_main(Host_CSR_Graph &host_graph, cl::sycl::queue &queue) {
 
               // Some tuning constants
               // must have degree >= MIN_GROUP_SCHED_DEGREE to do thread-block scheduling
-              const uint32_t MIN_GROUP_SCHED_DEGREE = WORK_GROUP_SIZE + 1;
+              //const uint32_t MIN_GROUP_SCHED_DEGREE = WORK_GROUP_SIZE + 1;
+              const uint32_t MIN_GROUP_SCHED_DEGREE = 1;
 
               // get accessors
               auto row_start_acc = sycl_graph.row_start.get_access<cl::sycl::access::mode::read>(cgh);
