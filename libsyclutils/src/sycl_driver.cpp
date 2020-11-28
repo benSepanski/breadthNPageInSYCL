@@ -123,6 +123,7 @@ int load_graph_and_run_kernel(char *graph_file, cl::sycl::device_selector &dev_s
         // wait for copy to finish, throwing asynchronous exception to
         // handler if one is found
         queue.wait_and_throw();
+        std::cerr << "Graph copied onto device" << std::endl;
  
         // Run application
         auto startTime = std::chrono::high_resolution_clock::now();

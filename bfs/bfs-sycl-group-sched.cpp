@@ -46,40 +46,35 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                                 INF_buf(&INF, sycl::range<1>{1});
     /////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    /// Initialize the node data and worklists //////////////////////////////////////////////////////////////
+    /// Initialize the node data ////////////////////////////////////////////////////////////////////////////
     //
-    // Make alternating "in"-worklists and "out"-worklists
-    sycl::buffer<index_type, 1> worklist1_buf(sycl::range<1>{NNODES}),
-                                worklist2_buf(sycl::range<1>{NNODES}),
-                                *in_worklist_buf = &worklist1_buf,
-                                *out_worklist_buf = &worklist2_buf;
-    // Make buffers to hold the worklist sizes
-    gpu_size_t in_worklist_size;
-    sycl::buffer<gpu_size_t, 1> in_worklist_size_buf(&in_worklist_size, sycl::range<1>{1}),
-                                out_worklist_size_buf(sycl::range<1>{1});
-    // initialize node levels and worklists
+    // initialize node levels
     queue.submit([&] (sycl::handler &cgh) {
         // get access to node level
         auto node_level = sycl_graph.node_data.get_access<sycl::access::mode::discard_write>(cgh);
         // get INF on the device
         auto INF_acc = INF_buf.get_access<sycl::access::mode::read,
                                           sycl::access::target::constant_buffer>(cgh);
-        // dicard-write to in_worklist
-        auto in_worklist = in_worklist_buf->get_access<sycl::access::mode::discard_write>(cgh);
-        // need access to start node and worklist sizes
+        // need access to start node
         auto START_NODE_acc = START_NODE_buf.get_access<sycl::access::mode::read,
                                                         sycl::access::target::constant_buffer>(cgh);
-        auto in_worklist_size = in_worklist_size_buf.get_access<sycl::access::mode::discard_write>(cgh);
-        auto out_worklist_size = out_worklist_size_buf.get_access<sycl::access::mode::discard_write>(cgh);
+        auto NNODES_acc = NNODES_buf.get_access<sycl::access::mode::read,
+                                                sycl::access::target::constant_buffer>(cgh);
         // Initialize the node data
         const size_t BFS_INIT_WORK_GROUP_SIZE = std::min((size_t) THREAD_BLOCK_SIZE, (size_t) NNODES);
-        cgh.parallel_for<class bfs_init>(sycl::nd_range<1>{sycl::range<1>{NNODES},
+        // round up NNODES to work-group size
+        const size_t NUM_INIT_WORK_GROUPS = NNODES
+                                           + (BFS_INIT_WORK_GROUP_SIZE - NNODES % BFS_INIT_WORK_GROUP_SIZE)
+                                           % BFS_INIT_WORK_GROUP_SIZE;
+        cgh.parallel_for<class bfs_init>(sycl::nd_range<1>{sycl::range<1>{NUM_INIT_WORK_GROUPS},
                                                            sycl::range<1>{BFS_INIT_WORK_GROUP_SIZE}},
         [=](sycl::nd_item<1> my_item) {
+            // make sure global id is valid
+            if(my_item.get_global_id()[0] >= NNODES_acc[0]) {
+                return;
+            }
+            // initialize everything
             node_level[my_item.get_global_id()] = (my_item.get_global_id()[0] == START_NODE_acc[0]) ? 0 : INF_acc[0];
-            in_worklist[0] = START_NODE_acc[0];
-            in_worklist_size[0] = 1;
-            out_worklist_size[0] = 0;
         });
     });
     // Because we used discard writes, for some reason
@@ -94,15 +89,18 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     sycl::buffer<const size_t, 1> WORK_GROUP_SIZE_buf(&WORK_GROUP_SIZE, sycl::range<1>{1});
     const size_t MIN_GROUP_SCHED_DEGREE = 1;
     sycl::buffer<const size_t, 1> MIN_GROUP_SCHED_DEGREE_buf(&MIN_GROUP_SCHED_DEGREE, sycl::range<1>{1});
+    // We need to know when we've hit the last iteration
+    bool new_nodes = false, new_nodes_local_copy = false;
+    sycl::buffer<bool, 1> new_nodes_buf(&new_nodes, sycl::range<1>{1});
     /// Now invoke BFS routine at each level ////////////////////////////////////////////////////////////////
-    size_t level = 1, level_host_copy = 1, in_worklist_size_host_copy = 1;
+    size_t level = 1, level_host_copy = 1;
     sycl::buffer<size_t, 1> LEVEL_buf(&level, sycl::range<1>{1});
     do {
         /// Run an iteration of BFS ///////////////////////////////////////////////////////////////
         queue.submit([&] (sycl::handler &cgh) {
             sycl::stream sycl_stream(1024, 1024, cgh);
             // constants for work distribution
-            const size_t NUM_WORK_GROUPS = (in_worklist_size_host_copy + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE;
+            const size_t NUM_WORK_GROUPS = (NNODES + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE;
 
             // get constant access to some work-distribution constantss size on device
             auto WORK_GROUP_SIZE_acc = WORK_GROUP_SIZE_buf.get_access<sycl::access::mode::read,
@@ -119,14 +117,10 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                                                     sycl::access::target::constant_buffer>(cgh);
             auto INF_acc = INF_buf.get_access<sycl::access::mode::read,
                                               sycl::access::target::constant_buffer>(cgh);
-            // We need to read from the worklist and its size
-            auto in_worklist = in_worklist_buf->get_access<sycl::access::mode::read>(cgh);
-            // DON't PUT THESE IN CONSTANT MEMORY SINCE THEY CHANGE B/N KERNEL INVOCATIONS
-            auto IN_WORKLIST_SIZE = in_worklist_size_buf.get_access<sycl::access::mode::read>(cgh);
+            // We need to know if we have to keep going or not
+            auto new_nodes_acc = new_nodes_buf.get_access<sycl::access::mode::write>(cgh);
+            // we'll need the current level
             auto LEVEL = LEVEL_buf.get_access<sycl::access::mode::read>(cgh);
-            // We need to (discard) write to the out-worklist and its size
-            auto out_worklist = out_worklist_buf->get_access<sycl::access::mode::discard_write>(cgh);
-            auto out_worklist_size = out_worklist_size_buf.get_access<sycl::access::mode::atomic>(cgh);
 
             // group-local memory:
             cl::sycl::accessor<index_type, 1,
@@ -145,9 +139,10 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
             [=] (sycl::nd_item<1> my_item) {
                 // figure out what work I need to do (if any)
                 index_type my_work_left = 0;
-                if(my_item.get_global_id()[0] < IN_WORKLIST_SIZE[0]) {
+                if(my_item.get_global_id()[0] < NNODES_acc[0]
+                   && node_level[my_item.get_global_id()] == (LEVEL[0]-1)) {
                     // get my src node, first edge, and last edge in private memory
-                    index_type my_node = in_worklist[my_item.get_global_id()],
+                    index_type my_node = my_item.get_global_id()[0],
                                first_edge = row_start[my_node],
                                 last_edge = row_start[my_node+1];
                     // put first/last edge into local memory
@@ -191,10 +186,9 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                               last_edge = group_last_edges[work_node];
                     while( current_edge < last_edge ) {
                         index_type dst_node = edge_dst[current_edge];
-                        if( node_level[dst_node] == INF_acc[0] ) {
+                        if( node_level[dst_node] < LEVEL[0] ) {
                             node_level[dst_node] = LEVEL[0];
-                            gpu_size_t wl_index = out_worklist_size[0].fetch_add(1);
-                            out_worklist[wl_index] = dst_node;
+                            new_nodes_acc[0] = true;
                         }
                         current_edge += WORK_GROUP_SIZE_acc[0];
                     }
@@ -218,18 +212,13 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
             // Increment level (avoiding a copy device->host)
             auto level_acc = LEVEL_buf.get_access<sycl::access::mode::read_write>();
             level_acc[0] = ++level_host_copy;
-            // Set new in-worklist size and reset out-worklist size to zero
-            auto out_worklist_size_acc = out_worklist_size_buf.get_access<sycl::access::mode::read_write>();
-            in_worklist_size_host_copy = out_worklist_size_acc[0];
-            out_worklist_size_acc[0] = 0;
-            auto in_worklist_size_acc = in_worklist_size_buf.get_access<sycl::access::mode::read_write>();
-            in_worklist_size_acc[0] = in_worklist_size_host_copy;
-            // Swap worklists
-            std::swap(in_worklist_buf, out_worklist_buf);
-            std::cout << std::endl;
+            auto new_nodes_acc = new_nodes_buf.get_access<sycl::access::mode::read_write>();
+            new_nodes_local_copy = new_nodes_acc[0];
+            new_nodes_acc[0] = false;
+            //std::cerr << level_host_copy << std::endl;
         } // End Update Level SYCL scope
         ///////////////////////////////////////////////////////////////////////////////////////////
-    } while(level_host_copy < INF && in_worklist_size_host_copy > 0);
+    } while(level_host_copy < INF && new_nodes_local_copy);
     /////////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 
