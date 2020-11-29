@@ -87,8 +87,15 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     // Get some work-distribution constants onto device to avoid copies
     const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE;
     sycl::buffer<const size_t, 1> WORK_GROUP_SIZE_buf(&WORK_GROUP_SIZE, sycl::range<1>{1});
-    const size_t MIN_GROUP_SCHED_DEGREE = 1;
+    // assume warp size evenly divides work-group size
+    assert( WORK_GROUP_SIZE % WARP_SIZE == 0 );
+    const size_t WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
+    // min degree to work on node as group
+    const size_t MIN_GROUP_SCHED_DEGREE = WORK_GROUP_SIZE;
     sycl::buffer<const size_t, 1> MIN_GROUP_SCHED_DEGREE_buf(&MIN_GROUP_SCHED_DEGREE, sycl::range<1>{1});
+    // min degree to work on node as warp
+    const size_t MIN_WARP_SCHED_DEGREE = 1;
+    sycl::buffer<const size_t, 1> MIN_WARP_SCHED_DEGREE_buf(&MIN_WARP_SCHED_DEGREE, sycl::range<1>{1});
     // We need to know when we've hit the last iteration
     bool new_nodes = false, new_nodes_local_copy = false;
     sycl::buffer<bool, 1> new_nodes_buf(&new_nodes, sycl::range<1>{1});
@@ -107,6 +114,8 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                                                                       sycl::access::target::constant_buffer>(cgh);
             auto MIN_GROUP_SCHED_DEGREE_acc = MIN_GROUP_SCHED_DEGREE_buf.get_access<sycl::access::mode::read,
                                                                                     sycl::access::target::constant_buffer>(cgh);
+            auto MIN_WARP_SCHED_DEGREE_acc = MIN_WARP_SCHED_DEGREE_buf.get_access<sycl::access::mode::read,
+                                                                                  sycl::access::target::constant_buffer>(cgh);
             // Get read-access to the CSR graph
             auto row_start = sycl_graph.row_start.get_access<sycl::access::mode::read>(cgh);
             auto edge_dst  = sycl_graph.edge_dst.get_access<sycl::access::mode::read>(cgh);
@@ -129,8 +138,12 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                                    // local memory for nodes to store their first/last edges
                                    group_first_edges(sycl::range<1>{WORK_GROUP_SIZE}, cgh),
                                    group_last_edges(sycl::range<1>{WORK_GROUP_SIZE}, cgh),
-                                   // local memory for a work-node
-                                   group_work_node(sycl::range<1>{1}, cgh);
+                                   // local memory for a work-node during group-scheduling
+                                   group_work_node(sycl::range<1>{1}, cgh),
+                                   // local memory for work-nodes during warp-scheduling
+                                   warp_work_node(sycl::range<1>{WARPS_PER_GROUP}, cgh),
+                                   // communication between warps
+                                   warp_still_has_work(sycl::range<1>{1}, cgh);
 
             /// Now submit our bfs job //////////////////////////////////////////////////
             const size_t GLOBAL_SIZE = NUM_WORK_GROUPS * WORK_GROUP_SIZE;
@@ -186,11 +199,66 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                               last_edge = group_last_edges[work_node];
                     while( current_edge < last_edge ) {
                         index_type dst_node = edge_dst[current_edge];
-                        if( node_level[dst_node] < LEVEL[0] ) {
+                        if( node_level[dst_node] > LEVEL[0] ) {
                             node_level[dst_node] = LEVEL[0];
                             new_nodes_acc[0] = true;
                         }
                         current_edge += WORK_GROUP_SIZE_acc[0];
+                    }
+                }
+                ///////////////////////////////////////////////////////////////
+                //
+                // set up for warp scheduling
+                warp_still_has_work[0] = false;
+                size_t warp_id = my_item.get_local_id()[0] / WARP_SIZE,
+                       my_warp_local_id = my_item.get_local_id()[0] % WARP_SIZE;
+                warp_work_node[warp_id] = WARP_SIZE;
+                // wait for group-scheduling to finish
+                my_item.barrier();
+
+                /// warp-scheduling //////////////////////////////////////////
+                //(work as warps til no one wants warp control)
+                while(true) {
+                    // If I have enough work to do that I want to control the
+                    // warp, bid for control!
+                    if( my_work_left >= MIN_WARP_SCHED_DEGREE_acc[0] ) {
+                        warp_work_node[warp_id] = my_warp_local_id;
+                        warp_still_has_work[0] = true;
+                    }
+                    // Wait for everyone's control bids to finalize
+                    my_item.barrier(sycl::access::fence_space::local_space);
+                    // If no-one competed for control of the group, we're done!
+                    if(!warp_still_has_work[0]) {
+                        break;
+                    }
+                    // Otherwise, copy the work node into private memory
+                    // and set warp_still_has_work to false for next time
+                    index_type work_node = warp_work_node[warp_id];
+                    my_item.barrier(sycl::access::fence_space::local_space);
+                    if( work_node == my_warp_local_id ) {
+                        warp_work_node[warp_id] = WARP_SIZE;
+                        warp_still_has_work[0] = false;
+                        my_work_left = 0;
+                    }
+                    my_item.barrier(sycl::access::fence_space::local_space);
+                    // if my warp has no work to-do, just keep waiting in
+                    // this while-loop (so that other warps don't deadlock
+                    //                  on the barriers)
+                    if(work_node >= WARP_SIZE) {
+                        continue;
+                    }
+
+                    // Now work on the work_node's out-edges in batches of
+                    // size WARP_SIZE 
+                    size_t current_edge = group_first_edges[work_node] + my_warp_local_id,
+                              last_edge = group_last_edges[work_node];
+                    while( current_edge < last_edge ) {
+                        index_type dst_node = edge_dst[current_edge];
+                        if( node_level[dst_node] > LEVEL[0] ) {
+                            node_level[dst_node] = LEVEL[0];
+                            new_nodes_acc[0] = true;
+                        }
+                        current_edge += WARP_SIZE;
                     }
                 }
                 ///////////////////////////////////////////////////////////////
