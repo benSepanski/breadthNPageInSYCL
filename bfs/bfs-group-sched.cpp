@@ -92,6 +92,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     const size_t WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
     // min degree to work on node as group
     const size_t MIN_GROUP_SCHED_DEGREE = WORK_GROUP_SIZE;
+    //const size_t MIN_GROUP_SCHED_DEGREE = 1;
     sycl::buffer<const size_t, 1> MIN_GROUP_SCHED_DEGREE_buf(&MIN_GROUP_SCHED_DEGREE, sycl::range<1>{1});
     // min degree to work on node as warp
     const size_t MIN_WARP_SCHED_DEGREE = 1;
@@ -212,7 +213,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                 warp_still_has_work[0] = false;
                 size_t warp_id = my_item.get_local_id()[0] / WARP_SIZE,
                        my_warp_local_id = my_item.get_local_id()[0] % WARP_SIZE;
-                warp_work_node[warp_id] = WARP_SIZE;
+                warp_work_node[warp_id] = WORK_GROUP_SIZE_acc[0];
                 // wait for group-scheduling to finish
                 my_item.barrier();
 
@@ -222,7 +223,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                     // If I have enough work to do that I want to control the
                     // warp, bid for control!
                     if( my_work_left >= MIN_WARP_SCHED_DEGREE_acc[0] ) {
-                        warp_work_node[warp_id] = my_warp_local_id;
+                        warp_work_node[warp_id] = my_item.get_local_id()[0];
                         warp_still_has_work[0] = true;
                     }
                     // Wait for everyone's control bids to finalize
@@ -235,8 +236,8 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                     // and set warp_still_has_work to false for next time
                     index_type work_node = warp_work_node[warp_id];
                     my_item.barrier(sycl::access::fence_space::local_space);
-                    if( work_node == my_warp_local_id ) {
-                        warp_work_node[warp_id] = WARP_SIZE;
+                    if( work_node == my_item.get_local_id()[0] ) {
+                        warp_work_node[warp_id] = WORK_GROUP_SIZE_acc[0];
                         warp_still_has_work[0] = false;
                         my_work_left = 0;
                     }
@@ -244,7 +245,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                     // if my warp has no work to-do, just keep waiting in
                     // this while-loop (so that other warps don't deadlock
                     //                  on the barriers)
-                    if(work_node >= WARP_SIZE) {
+                    if(work_node >= WORK_GROUP_SIZE_acc[0]) {
                         continue;
                     }
 
