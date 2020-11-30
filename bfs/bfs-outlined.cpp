@@ -29,39 +29,114 @@ extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
 
 // classes used to name SYCL kernels
 class bfs_init;
-class bfs_iter;
+// One iteration of BFS
+class BFS_iter{
+    public:
+    static const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE;
+    private: 
+    // work distribution constants
+    const size_t NNODES,
+                 NEDGES,
+                 LEVEL,
+                 WARPS_PER_GROUP = (WORK_GROUP_SIZE + WARP_SIZE - 1) / WARP_SIZE,
+                 MIN_GROUP_SCHED_DEGREE = WORK_GROUP_SIZE,
+                 MIN_WARP_SCHED_DEGREE = WARP_SIZE,
+                 FINE_GRAINED_EDGE_CAP = WORK_GROUP_SIZE;
+    // global memory:
+    sycl::accessor<index_type, 1,
+                   sycl::access::mode::read,
+                   sycl::access::target::global_buffer>
+                       // read-access to the CSR graph
+                       row_start,
+                       edge_dst;
+    sycl::accessor<node_data_type, 1,
+                   sycl::access::mode::read_write,
+                   sycl::access::target::global_buffer>
+                       // read-write access to the BFS level of each node
+                       node_level;
+    sycl::accessor<bool, 1,
+                   sycl::access::mode::write,
+                   sycl::access::target::global_buffer>
+                       // set to true iff we made updates
+                       made_updates;
+    // group-local memory:
+    sycl::accessor<index_type, 1,
+                   sycl::access::mode::read_write,
+                   sycl::access::target::local> 
+                       // local memory for nodes to store their first/last edges
+                       group_first_edges,
+                       group_last_edges,
+                       // local memory for a work-node during group-scheduling
+                       group_work_node,
+                       // local memory for work-nodes during warp-scheduling
+                       warp_work_node,
+                       // fine-grained scheduling for edges
+                       fine_grained_edges;
+    sycl::accessor<bool, 1,
+                   sycl::access::mode::read_write,
+                   sycl::access::target::local> 
+                       // communication between warps
+                       warp_still_has_work;
+    sycl::accessor<gpu_size_t, 1,
+                   sycl::access::mode::atomic,
+                   sycl::access::target::local>
+                       // fine-grained scheduling queue size
+                       num_fine_grained_edges;
 
+    void group_scheduling(const sycl::nd_item<1> &my_item,
+                          index_type &my_work_left,
+                          index_type my_first_edge, 
+                          index_type my_last_edge);
+
+    void warp_scheduling(const sycl::nd_item<1> &my_item,
+                         index_type &my_work_left,
+                         index_type my_first_edge, 
+                         index_type my_last_edge);
+
+    void fine_grained_scheduling(const sycl::nd_item<1> &my_item,
+                                 index_type &my_work_left,
+                                 index_type my_first_edge, 
+                                 index_type my_last_edge);
+
+    public:
+    BFS_iter(size_t level,
+             sycl::buffer<bool, 1> &made_updates_buf,
+             SYCL_CSR_Graph &sycl_graph,
+             sycl::handler &cgh)
+        // initialize some constants
+        : NNODES{ sycl_graph.nnodes }
+        , NEDGES{ sycl_graph.nedges }
+        , LEVEL{ level }
+        // to record if we made updates
+        , made_updates{ made_updates_buf, cgh}
+        // group-local memory
+        , group_first_edges{ sycl::range<1>{WORK_GROUP_SIZE}, cgh }
+        , group_last_edges{ sycl::range<1>{WORK_GROUP_SIZE}, cgh }
+        , group_work_node{ sycl::range<1>{1}, cgh }
+        , warp_work_node{ sycl::range<1>{WARPS_PER_GROUP}, cgh }
+        , warp_still_has_work{ sycl::range<1>{1}, cgh }
+        , fine_grained_edges{ sycl::range<1>{FINE_GRAINED_EDGE_CAP}, cgh }
+        , num_fine_grained_edges{ sycl::range<1>{1}, cgh }
+        // graph in global memory
+        , row_start{ sycl_graph.row_start, cgh }
+        , edge_dst{  sycl_graph.edge_dst,  cgh }
+        , node_level{sycl_graph.node_data, cgh }
+        { }
+
+    void operator()(sycl::nd_item<1>);
+};
 
 /**
  * Run BFS on the sycl_graph from start_node, storing each node's level
  * into the node_data
  */
 void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
-    /// Put some constants on a buffer and initialize to avoid host-device loops ////////////////////////////
-    //
-    const index_type NNODES = sycl_graph.nnodes,
-                     NEDGES = sycl_graph.nedges,
-                     START_NODE = start_node;
-    sycl::buffer<index_type, 1> NNODES_buf(&NNODES, sycl::range<1>{1}),
-                                NEDGES_buf(&NEDGES, sycl::range<1>{1}),
-                                START_NODE_buf(&START_NODE, sycl::range<1>{1}),
-                                INF_buf(&INF, sycl::range<1>{1});
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //
-    /// Initialize the node data ////////////////////////////////////////////////////////////////////////////
-    //
     // initialize node levels
     queue.submit([&] (sycl::handler &cgh) {
         // get access to node level
         auto node_level = sycl_graph.node_data.get_access<sycl::access::mode::discard_write>(cgh);
-        // get INF on the device
-        auto INF_acc = INF_buf.get_access<sycl::access::mode::read,
-                                          sycl::access::target::constant_buffer>(cgh);
-        // need access to start node
-        auto START_NODE_acc = START_NODE_buf.get_access<sycl::access::mode::read,
-                                                        sycl::access::target::constant_buffer>(cgh);
-        auto NNODES_acc = NNODES_buf.get_access<sycl::access::mode::read,
-                                                sycl::access::target::constant_buffer>(cgh);
+        const size_t NNODES = sycl_graph.nnodes;
+        const index_type START_NODE = start_node;
         // Initialize the node data
         const size_t BFS_INIT_WORK_GROUP_SIZE = std::min((size_t) THREAD_BLOCK_SIZE, (size_t) NNODES);
         // round up NNODES to work-group size
@@ -72,366 +147,43 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                                                            sycl::range<1>{BFS_INIT_WORK_GROUP_SIZE}},
         [=](sycl::nd_item<1> my_item) {
             // make sure global id is valid
-            if(my_item.get_global_id()[0] >= NNODES_acc[0]) {
+            sycl::id<1> my_global_id = my_item.get_global_id();
+            if(my_global_id[0] >= NNODES) {
                 return;
             }
             // initialize everything
-            node_level[my_item.get_global_id()] = (my_item.get_global_id()[0] == START_NODE_acc[0]) ? 0 : INF_acc[0];
+            node_level[my_global_id] = (my_global_id[0] == START_NODE) ? 0 : INF;
         });
     });
-    // Because we used discard writes, for some reason
-    // sycl does not pick up on the data and dependency and
-    // wait for the initialization to finish before starting the iters.
-    // So, we must force it to wait explicitly
-    queue.wait();
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //
-    /// Constants and buffer set-up /////////////////////////////////////////////////////////////////////////
-    //
-    // Get some work-distribution constants onto device to avoid copies
-    const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE;
-    sycl::buffer<const size_t, 1> WORK_GROUP_SIZE_buf(&WORK_GROUP_SIZE, sycl::range<1>{1});
-    // assume warp size evenly divides work-group size
-    assert( WORK_GROUP_SIZE % WARP_SIZE == 0 );
-    const size_t WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
-    // min degree to work on node as group
-    const size_t MIN_GROUP_SCHED_DEGREE = WORK_GROUP_SIZE;
-    sycl::buffer<const size_t, 1> MIN_GROUP_SCHED_DEGREE_buf(&MIN_GROUP_SCHED_DEGREE, sycl::range<1>{1});
-    // min degree to work on node as warp
-    const size_t MIN_WARP_SCHED_DEGREE = WARP_SIZE;
-    sycl::buffer<const size_t, 1> MIN_WARP_SCHED_DEGREE_buf(&MIN_WARP_SCHED_DEGREE, sycl::range<1>{1});
-    // Number of edges to work on at a time during fine-grained.
-    // this MUST BE a multiple of WORK_GROUP_SIZE
-    // TODO: Make sure this fits in local memory
-    const size_t FINE_GRAINED_EDGE_CAP = WORK_GROUP_SIZE;
-    sycl::buffer<const size_t, 1> FINE_GRAINED_EDGE_CAP_buf(&FINE_GRAINED_EDGE_CAP, sycl::range<1>{1});
-    assert(FINE_GRAINED_EDGE_CAP % WORK_GROUP_SIZE == 0);
 
-    // We need to know when we've hit the last iteration
-    bool new_nodes = false, new_nodes_local_copy = false;
-    sycl::buffer<bool, 1> new_nodes_buf(&new_nodes, sycl::range<1>{1});
-    /// We need a buffer for the level
-    size_t level = 1, level_host_copy = 1;
-    sycl::buffer<size_t, 1> LEVEL_buf(&level, sycl::range<1>{1});
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //
-    /// Lambda function which runs an iteration of BFS /////////////////////////////////////////////////////
-    auto bfs_iter_lambda = [&] (sycl::handler &cgh) {
-        sycl::stream sycl_stream(1024, 1024, cgh);
-        // constants for work distribution
-        const size_t NUM_WORK_GROUPS = (NNODES + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE;
-
-        // get constant access to some work-distribution constantss size on device
-        auto WORK_GROUP_SIZE_acc = WORK_GROUP_SIZE_buf.get_access<sycl::access::mode::read,
-                                                                  sycl::access::target::constant_buffer>(cgh);
-        auto MIN_GROUP_SCHED_DEGREE_acc = MIN_GROUP_SCHED_DEGREE_buf.get_access<sycl::access::mode::read,
-                                                                                sycl::access::target::constant_buffer>(cgh);
-        auto MIN_WARP_SCHED_DEGREE_acc = MIN_WARP_SCHED_DEGREE_buf.get_access<sycl::access::mode::read,
-                                                                              sycl::access::target::constant_buffer>(cgh);
-        auto FINE_GRAINED_EDGE_CAP_acc = FINE_GRAINED_EDGE_CAP_buf.get_access<sycl::access::mode::read,
-                                                                              sycl::access::target::constant_buffer>(cgh);
-        // Get read-access to the CSR graph
-        auto row_start = sycl_graph.row_start.get_access<sycl::access::mode::read>(cgh);
-        auto edge_dst  = sycl_graph.edge_dst.get_access<sycl::access::mode::read>(cgh);
-        // Get read-write access to the node's level
-        auto node_level = sycl_graph.node_data.get_access<sycl::access::mode::read_write>(cgh);
-        // Get constant access to the number of nodes, edges, and the INF constant
-        auto NNODES_acc = NNODES_buf.get_access<sycl::access::mode::read,
-                                                sycl::access::target::constant_buffer>(cgh);
-        auto NEDGES_acc = NEDGES_buf.get_access<sycl::access::mode::read,
-                                                sycl::access::target::constant_buffer>(cgh);
-        auto INF_acc = INF_buf.get_access<sycl::access::mode::read,
-                                          sycl::access::target::constant_buffer>(cgh);
-        // We need to know if we have to keep going or not
-        auto new_nodes_acc = new_nodes_buf.get_access<sycl::access::mode::write>(cgh);
-        // we'll need the current level
-        auto LEVEL = LEVEL_buf.get_access<sycl::access::mode::read>(cgh);
-
-        // group-local memory:
-        sycl::accessor<index_type, 1,
-                       sycl::access::mode::read_write,
-                       sycl::access::target::local> 
-                           // local memory for nodes to store their first/last edges
-                           group_first_edges(sycl::range<1>{WORK_GROUP_SIZE}, cgh),
-                           group_last_edges(sycl::range<1>{WORK_GROUP_SIZE}, cgh),
-                           // local memory for nodes to store work left to do
-                           group_work_left(sycl::range<1>{WORK_GROUP_SIZE}, cgh),
-                           // local memory for a work-node during group-scheduling
-                           group_work_node(sycl::range<1>{1}, cgh),
-                           // local memory for work-nodes during warp-scheduling
-                           warp_work_node(sycl::range<1>{WARPS_PER_GROUP}, cgh),
-                           // communication between warps
-                           warp_still_has_work(sycl::range<1>{1}, cgh),
-                           // fine-grained scheduling for edges
-                           fine_grained_edges(sycl::range<1>{FINE_GRAINED_EDGE_CAP}, cgh),
-                           // 0 iff no updates were performed in this group after
-                           // a full (group-sched, warp-sched, fine-grained-sched) cycle
-                           new_updates_in_group(sycl::range<1>{1}, cgh);
-        sycl::accessor<node_data_type, 1,
-                       sycl::access::mode::read_write,
-                       sycl::access::target::local> 
-                           // local memory for the level of the work-node during group-scheduling
-                           group_work_node_level(sycl::range<1>{1}, cgh),
-                           // for level of work-nodes during warp-scheduling
-                           warp_work_node_level(sycl::range<1>{WARPS_PER_GROUP}, cgh),
-                           // for levels during fine-grained scheduling
-                           fine_grained_edge_level(sycl::range<1>{FINE_GRAINED_EDGE_CAP}, cgh);
-        sycl::accessor<gpu_size_t, 1,
-                       sycl::access::mode::atomic,
-                       sycl::access::target::local>
-                           // fine-grained scheduling queue size
-                           num_fine_grained_edges(sycl::range<1>{1}, cgh);
-
-        /// Now submit our bfs job //////////////////////////////////////////////////////
-        const size_t GLOBAL_SIZE = NUM_WORK_GROUPS * WORK_GROUP_SIZE;
-        cgh.parallel_for<class bfs_iter>(sycl::nd_range<1>{sycl::range<1>{GLOBAL_SIZE},
-                                                           sycl::range<1>{WORK_GROUP_SIZE}},
-        [=] (sycl::nd_item<1> my_item) {
-            // get my src node, first edge, and last edge in private memory
-            index_type my_node = my_item.get_global_id()[0],
-                 my_first_edge = row_start[my_node],
-                  my_last_edge = row_start[my_node+1];
-            // put first/last edge into local memory
-            group_first_edges[my_item.get_local_id()] = my_first_edge;
-            group_last_edges[my_item.get_local_id()] = my_last_edge;
-            // figure out what work I need to do (if any)
-            group_work_left[my_item.get_local_id()] =
-                (my_item.get_global_id()[0] < NNODES_acc[0] && node_level[my_item.get_global_id()] < INF) 
-                ? (my_last_edge - my_first_edge)
-                : 0;
-            // Initialize work_node to its invalid value
-            group_work_node[0] = WORK_GROUP_SIZE_acc[0];
-            // Now wait for everyone else in my group to figure their work too
-            my_item.barrier(sycl::access::fence_space::local_space);
-
-            /// Attempt at iteration outlining ////////////////////////////////////////////////////
-            //
-            // Run this until there are no updates in our portion of the graph
-            new_updates_in_group[0] = true;
-            while(new_updates_in_group[0]) {
-                new_updates_in_group[0] = false;
-                /// group-scheduling ///////////////////////////////////////////////
-                //(work as group til no one wants group control)
-                while(true) {
-                    // If I have enough work to do that I want to control the
-                    // whole group, bid for control!
-                    if( group_work_left[my_item.get_local_id()] >= MIN_GROUP_SCHED_DEGREE_acc[0] ) {
-                        group_work_node[0] = my_item.get_local_id()[0];
-                    }
-                    // Wait for everyone's control bids to finalize
-                    // (and for any node-level updates to stick)
-                    my_item.barrier(sycl::access::fence_space::global_and_local);
-                    // If no-one competed for control of the group, we're done!
-                    if(group_work_node[0] == WORK_GROUP_SIZE_acc[0]) {
-                        break;
-                    }
-                    // Otherwise, copy the work node into private memory
-                    // and clear the group-work-node for next time
-                    index_type work_node = group_work_node[0];
-                    my_item.barrier(sycl::access::fence_space::local_space);
-                    if( work_node == my_item.get_local_id()[0] ) {
-                        group_work_node[0] = WORK_GROUP_SIZE_acc[0];
-                        group_work_node_level[0] = node_level[my_item.get_global_id()];
-                        group_work_left[my_item.get_local_id()] = 0;
-                    }
-                    my_item.barrier(sycl::access::fence_space::local_space);
-                    node_data_type work_level = group_work_node_level[0];
-
-                    // Now work on the work_node's out-edges in batches of
-                    // size WORK_GROUP_SIZE
-                    size_t current_edge = group_first_edges[work_node] + my_item.get_local_id()[0],
-                              last_edge = group_last_edges[work_node];
-                    while( current_edge < last_edge ) {
-                        index_type dst_node = edge_dst[current_edge];
-                        if( node_level[dst_node] > work_level + 1 ) {
-                            node_level[dst_node] = work_level + 1;
-                            new_nodes_acc[0] = true;
-                            size_t offset = my_item.get_global_id()[0] - my_item.get_local_id()[0];
-                            if(dst_node >= offset && (dst_node - offset < my_item.get_local_range()[0]))
-                            {
-                                size_t dst_node_local = dst_node - offset;
-                                group_work_left[dst_node_local] = group_last_edges[dst_node_local] - group_first_edges[dst_node_local];
-                                new_updates_in_group[0] = true;
-                            }
-                        }
-                        current_edge += WORK_GROUP_SIZE_acc[0];
-                    }
-                }
-                ///////////////////////////////////////////////////////////////////
-                //
-                // set up for warp scheduling
-                warp_still_has_work[0] = false;
-                size_t warp_id = my_item.get_local_id()[0] / WARP_SIZE,
-                       my_warp_local_id = my_item.get_local_id()[0] % WARP_SIZE;
-                warp_work_node[warp_id] = WORK_GROUP_SIZE_acc[0];
-                // wait for group-scheduling to finish
-                my_item.barrier();
-
-                /// warp-scheduling ///////////////////////////////////////////////
-                //(work as warps til no one wants warp control)
-                while(true) {
-                    // If I have enough work to do that I want to control the
-                    // warp, bid for control!
-                    if( group_work_left[my_item.get_local_id()] >= MIN_WARP_SCHED_DEGREE_acc[0] 
-                        && group_work_left[my_item.get_local_id()] < MIN_GROUP_SCHED_DEGREE_acc[0])
-                    {
-                        warp_work_node[warp_id] = my_item.get_local_id()[0];
-                        warp_still_has_work[0] = true;
-                    }
-                    // Wait for everyone's control bids to finalize
-                    // (and for any level updates to stick)
-                    my_item.barrier(sycl::access::fence_space::global_and_local);
-                    // If no-one competed for control of the group, we're done!
-                    if(!warp_still_has_work[0]) {
-                        break;
-                    }
-                    // Otherwise, copy the work node into private memory
-                    // and set warp_still_has_work to false for next time
-                    index_type work_node = warp_work_node[warp_id];
-                    my_item.barrier(sycl::access::fence_space::local_space);
-                    if( work_node == my_item.get_local_id()[0] ) {
-                        warp_work_node_level[warp_id] = node_level[my_item.get_global_id()];
-                        warp_work_node[warp_id] = WORK_GROUP_SIZE_acc[0];
-                        warp_still_has_work[0] = false;
-                        group_work_left[my_item.get_local_id()] = 0;
-                    }
-                    my_item.barrier(sycl::access::fence_space::local_space);
-                    // if my warp has no work to-do, just keep waiting in
-                    // this while-loop (so that other warps don't deadlock
-                    //                  on the barriers)
-                    if(work_node >= WORK_GROUP_SIZE_acc[0]) {
-                        continue;
-                    }
-                    node_data_type work_level = warp_work_node_level[warp_id];
-
-                    // Now work on the work_node's out-edges in batches of
-                    // size WARP_SIZE 
-                    size_t current_edge = group_first_edges[work_node] + my_warp_local_id,
-                              last_edge = group_last_edges[work_node];
-                    while( current_edge < last_edge ) {
-                        index_type dst_node = edge_dst[current_edge];
-                        if( node_level[dst_node] > work_level + 1 ) {
-                            node_level[dst_node] = work_level + 1;
-                            new_nodes_acc[0] = true;
-                            // if dst-node is in my local range, make sure
-                            // it does work now that its level has been updated!
-                            size_t offset = my_item.get_global_id()[0] - my_item.get_local_id()[0];
-                            if(dst_node >= offset && (dst_node - offset < my_item.get_local_range()[0]))
-                            {
-                                size_t dst_node_local = dst_node - offset;
-                                group_work_left[dst_node_local] = group_last_edges[dst_node_local] - group_first_edges[dst_node_local];
-                                new_updates_in_group[0] = true;
-                            }
-                        }
-                        current_edge += WARP_SIZE;
-                    }
-                }
-                ///////////////////////////////////////////////////////////////////
-                //
-                // set up for fine-grained scheduling
-                if(my_item.get_local_id()[0] == 0) {
-                    num_fine_grained_edges[0].store(0);
-                }
-                // wait for warp-scheduling to finish (and make sure updates from
-                //                                     warp-phase to the node level land)
-                my_item.barrier(sycl::access::fence_space::global_and_local);
-                // more set-up for fine-grained scheduling:
-                //
-                // Keep track of which edge (if any) is next on the fine-grained edge array
-                index_type my_next_fine_grained_edge = my_first_edge;
-                // get my position in the line to have my fine-grained edges handled
-                size_t my_fine_grained_index = INF;
-                bool have_fine_grained_index = false;
-                if(group_work_left[my_item.get_local_id()] > 0
-                   && group_work_left[my_item.get_local_id()] < MIN_WARP_SCHED_DEGREE_acc[0])
-                {
-                    my_fine_grained_index = num_fine_grained_edges[0].fetch_add(group_work_left[my_item.get_local_id()]);
-                    have_fine_grained_index = true;
-                }
-                // Set fine-grained edges to an invalid initial value
-                for(size_t i = my_item.get_local_id()[0]; i < FINE_GRAINED_EDGE_CAP_acc[0]; i += WORK_GROUP_SIZE_acc[0]) {
-                    fine_grained_edges[i] = NEDGES_acc[0];
-                }
-                my_item.barrier(sycl::access::fence_space::local_space);
-
-                /// Begin fine-grained scheduling /////////////////////////////////
-                gpu_size_t total_work = num_fine_grained_edges[0].load();
-                for(size_t i = 0; i < total_work; i += FINE_GRAINED_EDGE_CAP_acc[0]) {
-                    // If I have work to do and my edges fit on the fine-grained edges array,
-                    // put my edges on the array!
-                    if(have_fine_grained_index) {
-                        while(group_work_left[my_item.get_local_id()] > 0 && my_fine_grained_index < FINE_GRAINED_EDGE_CAP_acc[0]) {
-                            fine_grained_edges[my_fine_grained_index] = my_next_fine_grained_edge++;
-                            fine_grained_edge_level[my_fine_grained_index++] = node_level[my_item.get_global_id()];
-                            group_work_left[my_item.get_local_id()]--;
-                        }
-                        if(group_work_left[my_item.get_local_id()] == 0) {
-                            have_fine_grained_index = false;
-                        }
-                    }
-                    // Wait for everyone's edges to get on the array
-                    my_item.barrier(sycl::access::fence_space::local_space);
-                    // Now, work on the fine-grained edges
-                    for(size_t j = my_item.get_local_id()[0]; j < FINE_GRAINED_EDGE_CAP_acc[0]; j += WORK_GROUP_SIZE_acc[0]) {
-                        // get the edge I'm supposed to work on and reset it to an invalid value
-                        // for next time
-                        index_type edge_index = fine_grained_edges[j];
-                        fine_grained_edges[j] = NEDGES_acc[0];
-                        // If I got an invalid edge, skip
-                        if(edge_index >= NEDGES_acc[0]) {
-                            continue;
-                        }
-                        // If I got a valid edge, see if I can improve its BFS level
-                        index_type dst_node = edge_dst[edge_index];
-                        if( node_level[dst_node] > fine_grained_edge_level[j] + 1 ) {
-                            node_level[dst_node] = fine_grained_edge_level[j] + 1;
-                            new_nodes_acc[0] = true;
-                            size_t offset = my_item.get_global_id()[0] - my_item.get_local_id()[0];
-                            if(dst_node >= offset && (dst_node - offset < my_item.get_local_range()[0])
-                               && group_work_left[dst_node-offset] == 0)
-                            {
-                                size_t dst_node_local = dst_node - offset;
-                                group_work_left[dst_node_local] = group_last_edges[dst_node_local] - group_first_edges[dst_node_local];
-                                new_updates_in_group[0] = true;
-                            }
-                        }
-                    }
-                    // Now we've done some amount of work, so I can lower my fine-grained index
-                    my_fine_grained_index -= FINE_GRAINED_EDGE_CAP_acc[0];
-                    // Make sure the node level updates go through, and that
-                    // the resets of the array entries finalize
-                    my_item.barrier(sycl::access::fence_space::global_and_local);
-                }
-                ///////////////////////////////////////////////////////////////////
-            }
-            //// end outlining //////////////////////////////////////////////////////////
-        });
-        /////////////////////////////////////////////////////////////////////////////////
-    };
-    ///////////////////////////////////////////////////////////////////////////////////////////////
-    //
-    /// Run each iteration of BFS /////////////////////////////////////////////////////////////////
+    const size_t WORK_GROUP_SIZE = BFS_iter::WORK_GROUP_SIZE,
+                 NUM_WORK_GROUPS = (sycl_graph.nnodes + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE,
+                 NUM_WORK_ITEMS = NUM_WORK_GROUPS * WORK_GROUP_SIZE;
+    bool made_updates = true,
+         made_updates_local_copy = made_updates;
+    size_t level = 1;
+    sycl::buffer<bool, 1> made_updates_buf(&made_updates, sycl::range<1>{1});
+    // How many jobs to submit at a time?
+    const size_t BFS_BATCH_SIZE = 10;
     do {
         // Run an iteration of BFS
-        queue.submit(bfs_iter_lambda);
-        // Wait for iteration to finish and throw asynchronous errors if any
-        queue.wait_and_throw();
-        // Begin Update Level SYCL scope (buffers only block to write-out on destruction,
-        //                          so without this scope the level may not increment, etc.)
+        for(size_t i = 0; i < BFS_BATCH_SIZE; ++i) {
+            queue.submit([&] (sycl::handler &cgh) {
+                BFS_iter current_iter(level++, made_updates_buf, sycl_graph, cgh);
+                cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
+                                                   sycl::range<1>{WORK_GROUP_SIZE}},
+                                 current_iter);
+            });
+        }
+        //  (buffers only block to write-out on destruction, so we need this scope)
         {
-            // NOTE: one would think that asking for write-access is enough to block,
-            //       but you HAVE TO ASK FOR READ ACCESS HERE in order to block
-            //       the next bfs iteration from running before the level is incremented
-            // Increment level (avoiding a copy device->host)
-            auto level_acc = LEVEL_buf.get_access<sycl::access::mode::read_write>();
-            level_acc[0] = ++level_host_copy;
-            auto new_nodes_acc = new_nodes_buf.get_access<sycl::access::mode::read_write>();
-            new_nodes_local_copy = new_nodes_acc[0];
-            new_nodes_acc[0] = false;
-        } // End Update Level SYCL scope
-        ///////////////////////////////////////////////////////////////////////////////////////////
-    } while(level_host_copy < INF && new_nodes_local_copy);
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////
+            auto made_updates_acc = made_updates_buf.get_access<sycl::access::mode::read_write>();
+            made_updates_local_copy = made_updates_acc[0];
+            made_updates_acc[0] = false;
+        } // End check for Updates SYCL scope
+    } while(level < INF && made_updates_local_copy);
+    // Wait for BFS to finish and throw asynchronous errors if any
+    queue.wait_and_throw();
 }
 
 
@@ -448,4 +200,270 @@ int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     }
 
     return 0;
+}
+
+/**
+ * Run group-scheduling on an iteration of BFS
+ *
+ * Should only be called internally by BFS_iter.
+ * Works on nodes with degree >= MIN_GROUP_SCHED_DEGREE
+ * as a group.
+ * Sets my_work_left to 0 if my node got worked on.
+ *
+ * Barriers:
+ *   - global and local at start and end.
+ *
+ * my_item: sycl object representing my item
+ * my_work_left: the amount of work my item still wants done.
+ *               May be modified.
+ * my_first_edge: the edge index of the first out-edge from the node
+ *                I want worked on, if any
+ * my_first_edge: the edge index of the last out-edge from the node
+ *                I want worked on, if any
+ */
+void BFS_iter::group_scheduling(const sycl::nd_item<1> &my_item,
+                                index_type &my_work_left,
+                                index_type my_first_edge, 
+                                index_type my_last_edge)
+{
+    my_item.barrier(sycl::access::fence_space::local_space);
+    // Initialize work_node to its invalid value
+    group_work_node[0] = WORK_GROUP_SIZE;
+    // Now wait for everyone 
+    my_item.barrier(sycl::access::fence_space::global_and_local);
+    //(work as group til no one wants group control)
+    while(true) {
+        // If I have enough work to do that I want to control the
+        // whole group, bid for control!
+        if( my_work_left >= MIN_GROUP_SCHED_DEGREE ) {
+            group_work_node[0] = my_item.get_local_id()[0];
+        }
+        // Wait for everyone's control bids to finalize
+        // (and for any node-level updates to stick)
+        my_item.barrier(sycl::access::fence_space::global_and_local);
+        // If no-one competed for control of the group, we're done!
+        if(group_work_node[0] == WORK_GROUP_SIZE) {
+            break;
+        }
+        // Otherwise, copy the work node into private memory
+        // and clear the group-work-node for next time
+        index_type work_node = group_work_node[0];
+        my_item.barrier(sycl::access::fence_space::local_space);
+        if( work_node == my_item.get_local_id()[0] ) {
+            group_work_node[0] = WORK_GROUP_SIZE;
+            my_work_left = 0;
+        }
+        my_item.barrier(sycl::access::fence_space::local_space);
+
+        // Now work on the work_node's out-edges in batches of
+        // size WORK_GROUP_SIZE
+        size_t current_edge = group_first_edges[work_node] + my_item.get_local_id()[0],
+                  last_edge = group_last_edges[work_node];
+        while( current_edge < last_edge ) {
+            index_type dst_node = edge_dst[current_edge];
+            if( node_level[dst_node] > LEVEL ) {
+                node_level[dst_node] = LEVEL;
+                made_updates[0] = true;
+            }
+            current_edge += WORK_GROUP_SIZE;
+        }
+    }
+    my_item.barrier(sycl::access::fence_space::global_and_local);
+}
+
+
+/**
+ * Run warp-scheduling on an iteration of BFS
+ *
+ * Should only be called internally by BFS_iter.
+ * Works on nodes with 
+ * MIN_WARP_SCHED_DEGREE <= degree < MIN_GROUP_SCHED_DEGREE
+ * as warps.
+ * Sets my_work_left to 0 if my node got worked on.
+ *
+ * Barriers:
+ *   - global and local at start and end.
+ *
+ * my_item: sycl object representing my item
+ * my_work_left: the amount of work my item still wants done.
+ *               May be modified.
+ * my_first_edge: the edge index of the first out-edge from the node
+ *                I want worked on, if any
+ * my_first_edge: the edge index of the last out-edge from the node
+ *                I want worked on, if any
+ */
+void BFS_iter::warp_scheduling(const sycl::nd_item<1> &my_item,
+                               index_type &my_work_left,
+                               index_type my_first_edge, 
+                               index_type my_last_edge)
+{
+    my_item.barrier(sycl::access::fence_space::local_space);
+    // set up for warp scheduling
+    warp_still_has_work[0] = false;
+    size_t warp_id = my_item.get_local_id()[0] / WARP_SIZE,
+           my_warp_local_id = my_item.get_local_id()[0] % WARP_SIZE;
+    warp_work_node[warp_id] = WORK_GROUP_SIZE;
+    // Wait for memory consistency
+    my_item.barrier(sycl::access::fence_space::global_and_local);
+
+    //(work as warps til no one wants warp control)
+    while(true) {
+        // If I have enough work to do that I want to control the
+        // warp, bid for control!
+        if( MIN_WARP_SCHED_DEGREE <= my_work_left && my_work_left < MIN_GROUP_SCHED_DEGREE ) {
+            warp_work_node[warp_id] = my_item.get_local_id()[0];
+            warp_still_has_work[0] = true;
+        }
+        // Wait for everyone's control bids to finalize
+        // (and for any level updates to stick)
+        my_item.barrier(sycl::access::fence_space::global_and_local);
+        // If no-one competed for control of the group, we're done!
+        if(!warp_still_has_work[0]) {
+            break;
+        }
+        // Otherwise, copy the work node into private memory
+        // and set warp_still_has_work to false for next time
+        index_type work_node = warp_work_node[warp_id];
+        my_item.barrier(sycl::access::fence_space::local_space);
+        if( work_node == my_item.get_local_id()[0] ) {
+            warp_work_node[warp_id] = WORK_GROUP_SIZE;
+            warp_still_has_work[0] = false;
+            my_work_left = 0;
+        }
+        my_item.barrier(sycl::access::fence_space::local_space);
+        // if my warp has no work to-do, just keep waiting in
+        // this while-loop (so that other warps don't deadlock
+        //                  on the barriers)
+        if(work_node >= WORK_GROUP_SIZE) {
+            continue;
+        }
+
+        // Now work on the work_node's out-edges in batches of
+        // size WARP_SIZE 
+        size_t current_edge = group_first_edges[work_node] + my_warp_local_id,
+                  last_edge = group_last_edges[work_node];
+        while( current_edge < last_edge ) {
+            index_type dst_node = edge_dst[current_edge];
+            if( node_level[dst_node] > LEVEL ) {
+                node_level[dst_node] = LEVEL;
+                made_updates[0] = true;
+            }
+            current_edge += WARP_SIZE;
+        }
+    }
+    my_item.barrier(sycl::access::fence_space::global_and_local);
+}
+
+
+/**
+ * Run fine-grained-scheduling on an iteration of BFS
+ *
+ * Should only be called internally by BFS_iter.
+ * Works on nodes with 
+ * 0 < degree < MIN_WARP_SCHED_DEGREE
+ * in a fine-grained fashion.
+ * Sets my_work_left to 0 if my node got worked on.
+ *
+ * Barriers:
+ *   - global and local at start and end.
+ *
+ * my_item: sycl object representing my item
+ * my_work_left: the amount of work my item still wants done.
+ *               May be modified.
+ * my_first_edge: the edge index of the first out-edge from the node
+ *                I want worked on, if any
+ * my_first_edge: the edge index of the last out-edge from the node
+ *                I want worked on, if any
+ */
+void BFS_iter::fine_grained_scheduling(const sycl::nd_item<1> &my_item,
+                                       index_type &my_work_left,
+                                       index_type my_first_edge, 
+                                       index_type my_last_edge)
+{
+    /// Setup /////////////////////////////////////////////////////////////////
+    my_item.barrier(sycl::access::fence_space::global_and_local);
+    // start with no fine-grained edges
+    if(my_item.get_local_id()[0] == 0) {
+        num_fine_grained_edges[0].store(0);
+    }
+    my_item.barrier(sycl::access::fence_space::local_space);
+    // get my position in the line to have my fine-grained edges handled
+    size_t my_fine_grained_index = INF;
+    if(0 < my_work_left && my_work_left < MIN_WARP_SCHED_DEGREE) {
+        my_fine_grained_index = num_fine_grained_edges[0].fetch_add(my_work_left);
+    }
+    // Set fine-grained edges to an invalid initial value
+    for(size_t i = my_item.get_local_id()[0]; i < FINE_GRAINED_EDGE_CAP; i += WORK_GROUP_SIZE) {
+        fine_grained_edges[i] = NEDGES;
+    }
+    ///////////////////////////////////////////////////////////////////////////
+    my_item.barrier(sycl::access::fence_space::local_space);
+
+    /// Work on fine-grained edges ////////////////////////////////////////////
+    gpu_size_t total_work = num_fine_grained_edges[0].load();
+    for(size_t i = 0; i < total_work; i += FINE_GRAINED_EDGE_CAP) {
+        // If I have work to do and
+        // my edges fit on the fine-grained edges array,
+        // put my edges on the array!
+        while(my_work_left > 0 && my_fine_grained_index < FINE_GRAINED_EDGE_CAP) {
+            fine_grained_edges[my_fine_grained_index++] = my_first_edge++;
+            my_work_left--;
+        }
+        // Wait for everyone's edges to get on the array
+        my_item.barrier(sycl::access::fence_space::local_space);
+        // Now, work on the fine-grained edges
+        for(size_t j = my_item.get_local_id()[0]; j < FINE_GRAINED_EDGE_CAP; j += WORK_GROUP_SIZE) {
+            // get the edge I'm supposed to work on and reset it to an invalid value
+            // for next time
+            index_type edge_index = fine_grained_edges[j];
+            fine_grained_edges[j] = NEDGES;
+            // If I got an invalid edge, skip
+            if(edge_index >= NEDGES) {
+                continue;
+            }
+            // If I got a valid edge, see if I can improve its BFS level
+            index_type dst_node = edge_dst[edge_index];
+            if( node_level[dst_node] > LEVEL ) {
+                node_level[dst_node] = LEVEL;
+                made_updates[0] = true;
+            }
+        }
+        // Now we've done some amount of work, so I can lower my fine-grained index
+        my_fine_grained_index -= FINE_GRAINED_EDGE_CAP;
+        // Make sure the node level updates go through, and that
+        // the resets of the array entries finalize
+        my_item.barrier(sycl::access::fence_space::global_and_local);
+    }
+    ///////////////////////////////////////////////////////////////////////////
+
+    my_item.barrier(sycl::access::fence_space::global_and_local);
+}
+
+/*
+ * Perform an iteration of BFS at the given LEVEL
+ * (i.e. looking for nodes with distance to source of LEVEL)
+ */
+void BFS_iter::operator()(sycl::nd_item<1> my_item) {
+    // Get my global and local ids
+    sycl::id<1> my_global_id = my_item.get_global_id(),
+                my_local_id = my_item.get_local_id();
+    // figure out what work I need to do (if any)
+    index_type my_work_left = 0,
+               my_first_edge = INF,
+               my_last_edge = INF;
+    if(my_global_id[0] < NNODES && node_level[my_global_id] == (LEVEL-1)) {
+        // get my src node, first edge, and last edge in private memory
+        my_first_edge = row_start[my_global_id],
+        my_last_edge = row_start[my_global_id[0]+1];
+        // put first/last edge into local memory
+        group_first_edges[my_local_id] = my_first_edge;
+        group_last_edges[my_local_id] = my_last_edge;
+        // store the work I have left to do in private memory
+        my_work_left = my_last_edge - my_first_edge;
+    }
+
+    // Work on nodes as a group
+    group_scheduling(my_item, my_work_left, my_first_edge, my_last_edge);
+    warp_scheduling(my_item, my_work_left, my_first_edge, my_last_edge);
+    fine_grained_scheduling(my_item, my_work_left, my_first_edge, my_last_edge);
 }

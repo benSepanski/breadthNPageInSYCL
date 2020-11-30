@@ -155,15 +155,11 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
             node_level[my_global_id] = (my_global_id[0] == START_NODE) ? 0 : INF;
         });
     });
-    // Because we used discard writes, for some reason
-    // sycl does not pick up on the data and dependency and
-    // wait for the initialization to finish before starting the iters.
-    // So, we must force it to wait explicitly
-    queue.wait();
+
     const size_t WORK_GROUP_SIZE = BFS_iter::WORK_GROUP_SIZE,
                  NUM_WORK_GROUPS = (sycl_graph.nnodes + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE,
                  NUM_WORK_ITEMS = NUM_WORK_GROUPS * WORK_GROUP_SIZE;
-    bool made_updates = false,
+    bool made_updates = true,
          made_updates_local_copy = made_updates;
     size_t level = 1;
     sycl::buffer<bool, 1> made_updates_buf(&made_updates, sycl::range<1>{1});
@@ -175,20 +171,15 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                                                sycl::range<1>{WORK_GROUP_SIZE}},
                              current_iter);
         });
-        // Wait for iteration to finish and throw asynchronous errors if any
-        queue.wait_and_throw();
-        // Begin Update Level SYCL scope (buffers only block to write-out on destruction,
-        //                          so without this scope the level may not increment, etc.)
+        //  (buffers only block to write-out on destruction, so we need this scope)
         {
-            // NOTE: one would think that asking for write-access is enough to block,
-            //       but you HAVE TO ASK FOR READ ACCESS HERE in order to block
-            //       the next bfs iteration from running before the level is incremented
-            // Increment level (avoiding a copy device->host)
             auto made_updates_acc = made_updates_buf.get_access<sycl::access::mode::read_write>();
             made_updates_local_copy = made_updates_acc[0];
             made_updates_acc[0] = false;
-        } // End Update Level SYCL scope
+        } // End check for Updates SYCL scope
     } while(level < INF && made_updates_local_copy);
+    // Wait for BFS to finish and throw asynchronous errors if any
+    queue.wait_and_throw();
 }
 
 
