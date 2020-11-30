@@ -96,7 +96,6 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     const size_t WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
     // min degree to work on node as group
     const size_t MIN_GROUP_SCHED_DEGREE = WORK_GROUP_SIZE;
-    //const size_t MIN_GROUP_SCHED_DEGREE = 1;
     sycl::buffer<const size_t, 1> MIN_GROUP_SCHED_DEGREE_buf(&MIN_GROUP_SCHED_DEGREE, sycl::range<1>{1});
     // min degree to work on node as warp
     const size_t MIN_WARP_SCHED_DEGREE = WARP_SIZE;
@@ -333,16 +332,21 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                 if(my_item.get_local_id()[0] == 0) {
                     num_fine_grained_edges[0].store(0);
                 }
-                // wait for warp-scheduling to finish
-                my_item.barrier(sycl::access::fence_space::local_space);
+                // wait for warp-scheduling to finish (and make sure updates from
+                //                                     warp-phase to the node level land)
+                my_item.barrier(sycl::access::fence_space::global_and_local);
                 // more set-up for fine-grained scheduling:
                 //
+                // Keep track of which edge (if any) is next on the fine-grained edge array
+                index_type my_next_fine_grained_edge = my_first_edge;
                 // get my position in the line to have my fine-grained edges handled
                 size_t my_fine_grained_index = INF;
+                bool have_fine_grained_index = false;
                 if(group_work_left[my_item.get_local_id()] > 0
                    && group_work_left[my_item.get_local_id()] < MIN_WARP_SCHED_DEGREE_acc[0])
                 {
                     my_fine_grained_index = num_fine_grained_edges[0].fetch_add(group_work_left[my_item.get_local_id()]);
+                    have_fine_grained_index = true;
                 }
                 // Set fine-grained edges to an invalid initial value
                 for(size_t i = my_item.get_local_id()[0]; i < FINE_GRAINED_EDGE_CAP_acc[0]; i += WORK_GROUP_SIZE_acc[0]) {
@@ -353,13 +357,17 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                 /// Begin fine-grained scheduling /////////////////////////////////
                 gpu_size_t total_work = num_fine_grained_edges[0].load();
                 for(size_t i = 0; i < total_work; i += FINE_GRAINED_EDGE_CAP_acc[0]) {
-                    // If I have work to do and
-                    // my edges fit on the fine-grained edges array,
+                    // If I have work to do and my edges fit on the fine-grained edges array,
                     // put my edges on the array!
-                    while(group_work_left[my_item.get_local_id()] > 0 && my_fine_grained_index < FINE_GRAINED_EDGE_CAP_acc[0]) {
-                        fine_grained_edges[my_fine_grained_index] = my_first_edge++;
-                        fine_grained_edge_level[my_fine_grained_index++] = node_level[my_item.get_global_id()];
-                        group_work_left[my_item.get_local_id()]--;
+                    if(have_fine_grained_index) {
+                        while(group_work_left[my_item.get_local_id()] > 0 && my_fine_grained_index < FINE_GRAINED_EDGE_CAP_acc[0]) {
+                            fine_grained_edges[my_fine_grained_index] = my_next_fine_grained_edge++;
+                            fine_grained_edge_level[my_fine_grained_index++] = node_level[my_item.get_global_id()];
+                            group_work_left[my_item.get_local_id()]--;
+                        }
+                        if(group_work_left[my_item.get_local_id()] == 0) {
+                            have_fine_grained_index = false;
+                        }
                     }
                     // Wait for everyone's edges to get on the array
                     my_item.barrier(sycl::access::fence_space::local_space);
@@ -379,7 +387,8 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                             node_level[dst_node] = fine_grained_edge_level[j] + 1;
                             new_nodes_acc[0] = true;
                             size_t offset = my_item.get_global_id()[0] - my_item.get_local_id()[0];
-                            if(dst_node >= offset && (dst_node - offset < my_item.get_local_range()[0]))
+                            if(dst_node >= offset && (dst_node - offset < my_item.get_local_range()[0])
+                               && group_work_left[dst_node-offset] == 0)
                             {
                                 size_t dst_node_local = dst_node - offset;
                                 group_work_left[dst_node_local] = group_last_edges[dst_node_local] - group_first_edges[dst_node_local];
