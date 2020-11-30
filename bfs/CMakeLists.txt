@@ -1,3 +1,7 @@
-add_executable(bfs-group-sched bfs-group-sched.cpp support.cpp)
-add_sycl_to_target(TARGET bfs-group-sched SOURCES bfs-group-sched.cpp)
-target_link_libraries(bfs-group-sched breadthNPageInSYCL::syclUtils)
+add_executable(bfs-naive bfs-naive.cpp support.cpp)
+add_sycl_to_target(TARGET bfs-naive SOURCES bfs-naive.cpp)
+target_link_libraries(bfs-naive breadthNPageInSYCL::syclUtils)
+
+add_executable(bfs-outlined bfs-outlined.cpp support.cpp)
+add_sycl_to_target(TARGET bfs-outlined SOURCES bfs-outlined.cpp)
+target_link_libraries(bfs-outlined breadthNPageInSYCL::syclUtils)
