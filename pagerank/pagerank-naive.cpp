@@ -4,10 +4,12 @@
 
 // SYCL_CSR_Graph node_data_type index_type
 #include "sycl_csr_graph.h"
-// SYCLPipe
-#include "sycl-pipe.h"
-// SYCLOutWorklist
-#include "sycl-out-worklist.h"
+// Pipe
+#include "pipe.h"
+// OutWorklist
+#include "out_worklist.h"
+// InWorklist
+#include "in_worklist.h"
 
 #define THREAD_BLOCK_SIZE 256
 
@@ -20,6 +22,8 @@ namespace sycl = cl::sycl;
 class TEST;
 class TEST2;
 class TEST3;
+class TEST4;
+class TEST5;
 
 // probability of each node as computed by pagerank
 float *P_CURR;
@@ -45,13 +49,13 @@ int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
 
 void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     const gpu_size_t NUM_WORK_GROUPS = 6;
-    SYCLPipe wl_pipe{(gpu_size_t) sycl_graph.nedges, NUM_WORK_GROUPS};
+    Pipe wl_pipe{(gpu_size_t) sycl_graph.nedges, NUM_WORK_GROUPS};
     P_CURR = new float[sycl_graph.nnodes];
 
     wl_pipe.initialize(queue);
 
     queue.submit([&] (sycl::handler &cgh) {
-        SYCLOutWorklist out_wl(wl_pipe, cgh);
+        OutWorklist out_wl(wl_pipe, cgh);
 
         const gpu_size_t NNODES = (gpu_size_t) sycl_graph.nnodes;
         const gpu_size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE;
@@ -78,7 +82,7 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     });
     wl_pipe.compress(queue);
     queue.submit([&] (sycl::handler &cgh) {
-        SYCLOutWorklist out_wl(wl_pipe, cgh);
+        OutWorklist out_wl(wl_pipe, cgh);
 
         const gpu_size_t NNODES = (gpu_size_t) sycl_graph.nnodes;
         const gpu_size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE;
@@ -104,11 +108,26 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     wl_pipe.compress(queue);
     queue.submit([&] (sycl::handler &cgh) {
         sycl::stream sycl_stream(1025, 256, cgh);
-        SYCLOutWorklist out_wl(wl_pipe, cgh);
+        OutWorklist out_wl(wl_pipe, cgh);
         cgh.single_task<class TEST2>([=]() {
             out_wl.print(sycl_stream);
         });
     });
-    queue.wait_and_throw();
     wl_pipe.swapSlots(queue);
+    queue.submit([&] (sycl::handler &cgh) {
+        sycl::stream sycl_stream(1025, 256, cgh);
+        InWorklist in_wl(wl_pipe, cgh);
+        cgh.single_task<class TEST4>([=]() {
+            in_wl.print(sycl_stream);
+        });
+    });
+    queue.wait();
+    queue.submit([&] (sycl::handler &cgh) {
+        sycl::stream sycl_stream(1025, 256, cgh);
+        OutWorklist out_wl(wl_pipe, cgh);
+        cgh.single_task<class TEST5>([=]() {
+            out_wl.print(sycl_stream);
+        });
+    });
+    queue.wait_and_throw();
 }

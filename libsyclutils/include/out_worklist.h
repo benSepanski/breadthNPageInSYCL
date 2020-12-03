@@ -3,11 +3,11 @@
 
 // index_type
 #include "sycl_csr_graph.h"
-// SYCLPipe gpu_size_t
-#include "sycl-pipe.h"
+// Pipe gpu_size_t
+#include "pipe.h"
 
-#ifndef BREADTHNPAGEINSYCL_LIBSYCLUTILS_SYCLWORKLIST_
-#define BREADTHNPAGEINSYCL_LIBSYCLUTILS_SYCLWORKLIST_
+#ifndef BREADTHNPAGEINSYCL_LIBSYCLUTILS_OUTWORKLIST_
+#define BREADTHNPAGEINSYCL_LIBSYCLUTILS_OUTWORKLIST_
 
 namespace sycl = cl::sycl;
 
@@ -28,10 +28,10 @@ typedef uint32_t gpu_size_t ;
  *
  * Pushed entries are added to the group's portion of the worklist
  *
- * If you run out of space, use a SYCLPipe to compress the group portions into
+ * If you run out of space, use a Pipe to compress the group portions into
  * the contiguous portions.
  */
-class SYCLOutWorklist {
+class OutWorklist {
     private:
         const gpu_size_t WORKLIST_CAPACITY,
                          NUM_WORK_GROUPS;
@@ -62,7 +62,7 @@ class SYCLOutWorklist {
             sycl::access::target::local>
                 my_size;
     public:
-    SYCLOutWorklist(SYCLPipe &pipe, sycl::handler &cgh)
+    OutWorklist(Pipe &pipe, sycl::handler &cgh)
     : WORKLIST_CAPACITY{ pipe.get_worklist_capacity() }
     , NUM_WORK_GROUPS{ pipe.get_num_work_groups() }
     , worklist{ pipe.get_out_worklist_buf(), cgh }

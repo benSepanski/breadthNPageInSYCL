@@ -4,8 +4,8 @@
 // index_type
 #include "sycl_csr_graph.h"
 
-#ifndef BREADTHNPAGEINSYCL_LIBSYCLUTILS_SYCLPIPE_
-#define BREADTHNPAGEINSYCL_LIBSYCLUTILS_SYCLPIPE_
+#ifndef BREADTHNPAGEINSYCL_LIBSYCLUTILS_PIPE_
+#define BREADTHNPAGEINSYCL_LIBSYCLUTILS_PIPE_
 
 #define THREAD_BLOCK_SIZE 256
 
@@ -27,7 +27,7 @@ class ResetOutWorklistOffsets;
  * in the SYCLOutWorklist class
  *
  */
-class SYCLPipe {
+class Pipe {
     public:
         const gpu_size_t WORKLIST_CAPACITY,
                      NUM_WORK_GROUPS;
@@ -43,8 +43,8 @@ class SYCLPipe {
                                     out_worklist_sizes_buf,
                                     out_worklist_offsets_buf;
     public:
-        SYCLPipe(gpu_size_t worklist_capacity,
-                 gpu_size_t num_work_groups)
+        Pipe(gpu_size_t worklist_capacity,
+             gpu_size_t num_work_groups)
             : NUM_WORK_GROUPS{ num_work_groups }
             // round up to nearest multiple of num_work_groups plus num_work_groups
             // (the extra num_work_groups is so that if there are < worklist_capacity
@@ -81,6 +81,16 @@ class SYCLPipe {
         }
         auto& get_out_worklist_offsets_buf() {
             return this->out_worklist_offsets_buf;
+        }
+
+        /**
+         * in-worklist (and friends) getters
+         */
+        auto& get_in_worklist_buf() {
+            return *(this->in_worklist_buf);
+        }
+        auto& get_in_worklist_size_buf() {
+            return this->in_worklist_size_buf;
         }
 
         /**
@@ -131,7 +141,7 @@ class SYCLPipe {
                     // evenly distributed throughout the    
                     for(gpu_size_t wg = 0; wg < NUM_WORK_GROUPS; ++wg) {
                         out_worklist_sizes[wg] = 0;
-                        out_worklist_offsets[wg] = WORKLIST_CAPACITY / wg;
+                        out_worklist_offsets[wg] = wg * (WORKLIST_CAPACITY / NUM_WORK_GROUPS);
                     }
                 });
             });
