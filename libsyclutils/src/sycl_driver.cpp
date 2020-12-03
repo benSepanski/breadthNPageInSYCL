@@ -105,14 +105,6 @@ int load_graph_and_run_kernel(char *graph_file, cl::sycl::device_selector &dev_s
                                         cl::sycl::access::target::global_buffer>(cgh);
                 cgh.copy(edge_dst_host, edge_dst_dev);
             });
-            queue.submit([&] (cl::sycl::handler &cgh) {
-                auto node_data_host = sycl_graph.node_data.get_access<
-                                        cl::sycl::access::mode::read>(cgh);
-                auto node_data_dev = sycl_graph.node_data.get_access<
-                                        cl::sycl::access::mode::read_write,
-                                        cl::sycl::access::target::global_buffer>(cgh);
-                cgh.copy(node_data_host, node_data_dev);
-            });
         } catch(cl::sycl::exception const& e) {
             std::cerr << "Caught synchronous SYCL exception:\n" << e.what() << std::endl;
             if(e.get_cl_code() != CL_SUCCESS) {
