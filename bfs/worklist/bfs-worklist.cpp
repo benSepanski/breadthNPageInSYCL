@@ -1,27 +1,26 @@
-#include <chrono>
 #include <iostream>
-#include <limits>
-#include <CL/sycl.hpp>
 
 // From libsyclutils
 //
 // SYCL_CSR_Graph node_data_type index_type
 #include "sycl_csr_graph.h"
-// BFSPush gpu_size_t
-#include "BFSPush.h"
+// Pipe
+#include "pipe.h"
+// PushScheduler INF
+#include "push_scheduler.h"
 
 // easier than typing cl::sycl
 namespace sycl = cl::sycl;
 
+// class names for SYCL kernels
+class bfs_init;
+class wl_init;
+
 // from support.cpp
 extern index_type start_node;
 
-// defined here, but const so need to declare as extern so support.cpp
-// can use it
-extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
-
 // TODO: Make these extern consts which are determined by sycl_driver.cpp
-#define NUM_THREAD_BLOCKS 8
+#define NUM_THREAD_BLOCKS 6
 #define THREAD_BLOCK_SIZE 256
 #define WARP_SIZE 32
 
@@ -30,52 +29,44 @@ const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
              NUM_WORK_ITEMS  = NUM_WORK_GROUPS * WORK_GROUP_SIZE,
              WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
 
-// classes used to name SYCL kernels
-class bfs_init;
-class cumsum;
-class new_worklist_size;
 
-// BFS Sweeps
-class BFSPreSweep : public BFSPush { 
+// Define our BFS push operator
+class BFSIter : public PushScheduler<BFSIter> {
     public:
-    BFSPreSweep(size_t level,
-                sycl::buffer<index_type, 1> &in_worklist_buf,
-                sycl::buffer<size_t, 1> &in_worklist_size_buf,
-                SYCL_CSR_Graph &sycl_graph,
-                sycl::handler &cgh)
-       : BFSPush {level, in_worklist_buf, in_worklist_size_buf, sycl_graph, cgh}
+    BFSIter(SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
+            sycl::buffer<bool, 1> &out_worklist_needs_compression)
+        : PushScheduler{sycl_graph, pipe, cgh, out_worklist_needs_compression}
         { }
+
+    void applyPushOperator(sycl::nd_item<1> my_item, index_type src_node, index_type edge_index) {
+        index_type dst_node = edge_dst[edge_index];
+        if(node_data[dst_node] == INF) {
+            bool push_success = out_wl.push(my_item, dst_node);
+            if(push_success) {
+                node_data[dst_node] = node_data[src_node] + 1;
+            }
+            else {
+                out_worklist_full[0] = true;
+            }
+        }
+    }
 };
-class BFSPostSweep : public BFSPush { 
-    public:
-    BFSPostSweep(size_t level,
-                 sycl::buffer<index_type, 1> &in_worklist_buf,
-                 sycl::buffer<size_t, 1> &in_worklist_size_buf,
-                 SYCL_CSR_Graph &sycl_graph,
-                 sycl::handler &cgh)
-       : BFSPush {level, in_worklist_buf, in_worklist_size_buf, sycl_graph, cgh}
-        { }
-};
+
 
 /**
  * Run BFS on the sycl_graph from start_node, storing each node's level
  * into the node_data
  */
 void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
-    // set up worklist
-    sycl::buffer<index_type, 1> worklist1_buf(sycl::range<1>{sycl_graph.nnodes}),
-                                worklist2_buf(sycl::range<1>{sycl_graph.nnodes}),
-                                *in_worklist_buf = &worklist1_buf,
-                                *out_worklist_buf = &worklist2_buf;
-    sycl::buffer<size_t, 1> in_worklist_size_buf(sycl::range<1>{1});
-    sycl::buffer<gpu_size_t, 1> num_out_nodes_buf(sycl::range<1>{NUM_WORK_GROUPS});
+    // set up worklists
+    Pipe wl_pipe{(gpu_size_t) sycl_graph.nedges,
+                 (gpu_size_t) sycl_graph.nnodes,
+                 NUM_WORK_GROUPS};
+
     // initialize node levels
     queue.submit([&] (sycl::handler &cgh) {
         // get access to node level
-        auto node_level = sycl_graph.node_data.get_access<sycl::access::mode::discard_write>(cgh);
-        // get access to in_worklist and in_worklist size
-        auto in_worklist = in_worklist_buf->get_access<sycl::access::mode::discard_write>(cgh);
-        auto in_worklist_size = in_worklist_size_buf.get_access<sycl::access::mode::discard_write>(cgh);
+        auto node_data = sycl_graph.node_data.get_access<sycl::access::mode::discard_write>(cgh);
         // some constants
         const size_t NNODES = sycl_graph.nnodes;
         const index_type START_NODE = start_node;
@@ -85,63 +76,54 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
         [=](sycl::nd_item<1> my_item) {
             // set node levels to defaults
             for(size_t i = my_item.get_global_id()[0]; i < NNODES; i += NUM_WORK_ITEMS) {
-                node_level[i] = (i == START_NODE) ? 0 : INF;
-            }
-            // initialize in_worklist
-            if(my_item.get_global_id()[0] == 0) {
-                in_worklist_size[0] = 1;
-                in_worklist[0] = START_NODE;
+                node_data[i] = (i == START_NODE) ? 0 : INF;
             }
         });
     });
+    // Initialize out-worklist
+    wl_pipe.initialize(queue);
+    queue.submit([&] (sycl::handler &cgh) {
+        OutWorklist out_wl(wl_pipe, cgh);
+        const index_type START_NODE = start_node;
+        // We need an nd_item to push, so have to use this instead of single_task
+        cgh.parallel_for<class wl_init>(sycl::nd_range<1>{sycl::range<1>{1},
+                                                          sycl::range<1>{1}},
+        [=](sycl::nd_item<1> my_item) {
+            out_wl.initializeLocalMemory(my_item);
+            out_wl.push(my_item, START_NODE);
+            out_wl.publishLocalMemory(my_item);
+        });
+    });
+    wl_pipe.compress(queue);
+    wl_pipe.swapSlots(queue);
 
-    size_t level = 1, in_worklist_size = 1;
-    while(level < INF && in_worklist_size > 0) {
-        // Run a pre-sweep of BFS
+    // Run BFS
+    size_t level = 1;
+    bool rerun_level = false;
+    sycl::buffer<bool, 1> rerun_level_buf(&rerun_level, sycl::range<1>{1});
+    gpu_size_t in_wl_size = 1;
+    while(in_wl_size > 0) {
+        std::cout << "level " << level << ": worklist size: " << in_wl_size << std::endl;
         queue.submit([&] (sycl::handler &cgh) {
-            BFSPreSweep current_iter(level,
-                                     *in_worklist_buf,
-                                     in_worklist_size_buf,
-                                     sycl_graph,
-                                     cgh);
+            BFSIter current_iter(sycl_graph, wl_pipe, cgh, rerun_level_buf);
             cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                sycl::range<1>{WORK_GROUP_SIZE}},
                              current_iter);
         });
-        // Overwrite num_out_nodes with cumulative sum of its entries
-        queue.submit([&] (sycl::handler &cgh) {
-            auto array = num_out_nodes_buf.get_access<sycl::access::mode::read_write>(cgh);
-            cgh.single_task<class cumsum>( [=] () {
-                for(size_t i = 1; i < NUM_WORK_GROUPS; ++i) {
-                    array[i] += array[i-1];
-                }
-            });
-        });
-        // Build our out-worklist
-        queue.submit([&] (sycl::handler &cgh) {
-            BFSPostSweep current_iter(level++,
-                                      *in_worklist_buf,
-                                      in_worklist_size_buf,
-                                      sycl_graph,
-                                      cgh);
-            cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
-                                               sycl::range<1>{WORK_GROUP_SIZE}},
-                             current_iter);
-        });
-        // Get our new in-worklist size
-        queue.submit([&] (sycl::handler &cgh) {
-            auto in_worklist_size_acc = in_worklist_size_buf.get_access<sycl::access::mode::write>(cgh);
-            auto num_out_nodes_acc = num_out_nodes_buf.get_access<sycl::access::mode::read>(cgh);
-            cgh.single_task<class new_worklist_size>([=] () {
-                in_worklist_size_acc[0] = num_out_nodes_acc[NUM_WORK_GROUPS-1];
-            });
-        });
-        // swap in/out worklists
-        std::swap(in_worklist_buf, out_worklist_buf);
-        // get the in_worklist_size on the host 
+        wl_pipe.compress(queue);
         {
-            auto in_worklist_size_acc = in_worklist_size_buf.get_access<sycl::access::mode::read>();
-            in_worklist_size = in_worklist_size_acc[0];
+            auto rerun_level_acc = rerun_level_buf.get_access<sycl::access::mode::read_write>();
+            if(!rerun_level_acc[0]) {
+                std::cout << "NEXT LEVEL:\n";
+                level++;
+                wl_pipe.swapSlots(queue);
+                auto in_wl_size_acc = wl_pipe.get_in_worklist_size_buf().get_access<sycl::access::mode::read>();
+                in_wl_size = in_wl_size_acc[0];
+            }
+            else {
+                std::cout << "COMPRESS & RERUN\n";
+            }
+            rerun_level_acc[0] = false;
         }
     }
     // Wait for BFS to finish and throw asynchronous errors if any
@@ -162,18 +144,4 @@ int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     }
 
     return 0;
-}
-
-void BFSPreSweep::applyToOutEdge(sycl::nd_item<1> my_item, index_type edge_index) {
-    index_type dst_node = edge_dst[edge_index];
-    if(node_level[dst_node] == INF) {
-        node_level[dst_node] = LEVEL;
-    }
-}
-
-void BFSPostSweep::applyToOutEdge(sycl::nd_item<1> my_item, index_type edge_index) {
-    index_type dst_node = edge_dst[edge_index];
-    if(node_level[dst_node] == INF) {
-        node_level[dst_node] = LEVEL;
-    }
 }
