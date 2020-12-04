@@ -14,23 +14,29 @@ namespace sycl = cl::sycl;
 // since we need atomics, use 32-bits for size
 typedef uint32_t gpu_size_t ;
 
+class PIPETEST;
 // classes used to name kernels
 class InitializeWorklists;
 class SwapWorklists;
 class CompressOutWorklist;
 class ResetOutWorklistOffsets;
+class ClaimOwnership;
+class DeDupe;
 
 /**
- * Manages an in-worklist and an out-worklist.
+ * Manages an in-worklist and an out-worklist of nodes.
+ *
+ * These worklists must hold integers in the range [0, NNODES)
  *
  * The out-worklist is implemented and maintained as described
  * in the SYCLOutWorklist class
  *
  */
 class Pipe {
-    public:
+    private:
         const gpu_size_t WORKLIST_CAPACITY,
-                     NUM_WORK_GROUPS;
+                         NUM_WORK_GROUPS,
+                         NNODES;
 
         // GLOBAL MEMORY BUFFERS
         // in/out worklists
@@ -42,22 +48,34 @@ class Pipe {
         sycl::buffer<gpu_size_t, 1> in_worklist_size_buf,
                                     out_worklist_sizes_buf,
                                     out_worklist_offsets_buf;
+        // used for de-duping out-worklist during compression.
+        // Whenever a worker pushes a node onto the out-worklist, it should
+        // for ownership.
+        sycl::buffer<size_t, 1> owner_buf;
+
+        /**
+         * Used by compress to dedupe.
+         */
+        void dedupe(sycl::queue &queue);
     public:
         Pipe(gpu_size_t worklist_capacity,
+             gpu_size_t nnodes,
              gpu_size_t num_work_groups)
-            : NUM_WORK_GROUPS{ num_work_groups }
             // round up to nearest multiple of num_work_groups plus num_work_groups
             // (the extra num_work_groups is so that if there are < worklist_capacity
             //  items are on the queue, each group gets at least 1 slot on the
             //  out-worklist)
-            , WORKLIST_CAPACITY{ worklist_capacity + num_work_groups
+            : WORKLIST_CAPACITY{ worklist_capacity + num_work_groups
                                  + (num_work_groups - (worklist_capacity) % num_work_groups)
                                    % num_work_groups}
+            , NNODES{ nnodes }
+            , NUM_WORK_GROUPS{ num_work_groups }
             , worklist1_buf{ sycl::range<1>{WORKLIST_CAPACITY} }
             , worklist2_buf{ sycl::range<1>{WORKLIST_CAPACITY} }
             , in_worklist_size_buf{ sycl::range<1>{1} }
             , out_worklist_sizes_buf{ sycl::range<1>{NUM_WORK_GROUPS} }
             , out_worklist_offsets_buf{ sycl::range<1>{NUM_WORK_GROUPS} }
+            , owner_buf{ sycl::range<1>{NNODES} }
             { }
 
         /**
@@ -149,9 +167,14 @@ class Pipe {
 
     /**
      * Compress the out-worklist into a contiguous array
+     *
+     * De-dupes any entry (in the non-contiguous portion)
+     * which appears more than once
      */ 
     void compress(sycl::queue &queue) {
-        /// First, submit a job to copy memory from each group's portion of 
+        /// First, de-dupe
+        this->dedupe(queue);
+        /// Next, submit a job to copy memory from each group's portion of 
         // the out-worklist into the contiguous portion of the out-worklist
         queue.submit([&] (sycl::handler &cgh) {
             // copy constants
@@ -234,5 +257,134 @@ class Pipe {
         });
     }
 };
+
+void Pipe::dedupe(sycl::queue &queue) {
+    /// First, have each node compete for ownership. Whoever owns
+    // a node on the worklist has the one that is "not a duplicate"
+    queue.submit([&](sycl::handler &cgh) {
+        // global accessors
+        auto owner = this->owner_buf.get_access<sycl::access::mode::write>(cgh);
+        auto out_worklist = this->out_worklist_buf->get_access<sycl::access::mode::read>(cgh);
+        auto out_worklist_sizes = this->out_worklist_sizes_buf.get_access<sycl::access::mode::read>(cgh);
+        auto out_worklist_offsets = this->out_worklist_offsets_buf.get_access<sycl::access::mode::read>(cgh);
+        // local accessors
+        sycl::accessor<gpu_size_t, 1,
+                       sycl::access::mode::read_write,
+                       sycl::access::target::local>
+                           // offset of this group's part of the worklist
+                           offset{sycl::range<1>{1}, cgh},
+                           // size of this group's part of the worklist
+                           size{sycl::range<1>{1}, cgh};
+
+        const gpu_size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
+                         NUM_WORK_ITEMS  = WORK_GROUP_SIZE * NUM_WORK_GROUPS;
+        cgh.parallel_for<class ClaimOwnership>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
+                                                                 sycl::range<1>{WORK_GROUP_SIZE}},
+        [=](sycl::nd_item<1> my_item) {
+            // have worker 0 load my offset and size into local memory
+            if(my_item.get_local_id()[0] == 0) {
+                offset[0] = out_worklist_offsets[my_item.get_group(0)];
+                size[0] = out_worklist_sizes[my_item.get_group(0)];
+            }
+            my_item.barrier(sycl::access::fence_space::local_space);
+            // load offset and size into private memory
+            gpu_size_t my_offset = offset[0],
+                       my_size = size[0];
+            // compete for ownership
+            for(gpu_size_t i = my_item.get_local_id()[0]; i < my_size; i += WORK_GROUP_SIZE) {
+                owner[out_worklist[my_offset + i]] = my_item.get_global_id()[0];
+            }
+        });
+    });
+    queue.wait_and_throw();
+    std::cout << "FIRST HERE\n" << std::endl;
+    queue.submit([&](sycl::handler &cgh) {
+        sycl::stream sycl_stream(1024, 512, cgh);
+        const gpu_size_t NNODES = this->NNODES;
+        auto owner = this->owner_buf.get_access<sycl::access::mode::read>(cgh);
+        cgh.single_task<class PIPETEST>([=]() {
+            sycl_stream << "OWNERS: \n";
+            for(size_t i = 0; i < NNODES; ++i) {
+                sycl_stream << owner[i] << " ";
+            }
+            sycl_stream << sycl::endl;
+        });
+    });
+    queue.wait_and_throw();
+    std::cout << "HERE\n" << std::endl;
+    /// Next, de-dupe
+    queue.submit([&](sycl::handler &cgh) {
+        // global accessors
+        auto owner = this->owner_buf.get_access<sycl::access::mode::read>(cgh);
+        auto out_worklist = this->out_worklist_buf->get_access<sycl::access::mode::read_write>(cgh);
+        auto out_worklist_sizes = this->out_worklist_sizes_buf.get_access<sycl::access::mode::read_write>(cgh);
+        auto out_worklist_offsets = this->out_worklist_offsets_buf.get_access<sycl::access::mode::read>(cgh);
+        // local accessors
+        sycl::accessor<gpu_size_t, 1,
+                       sycl::access::mode::read_write,
+                       sycl::access::target::local>
+                           // offset of this group's part of the worklist
+                           offset{sycl::range<1>{1}, cgh},
+                           // size of this group's part of the worklist
+                           size{sycl::range<1>{1}, cgh};
+        sycl::accessor<gpu_size_t, 1,
+                       sycl::access::mode::atomic,
+                       sycl::access::target::local>
+                           // number of dupes de-duped so far
+                           num_dedupes{sycl::range<1>{1}, cgh},
+                           // where to substitute from when we found a dupe
+                           wl_substitute_index{sycl::range<1>{1}, cgh};
+
+        const gpu_size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
+                         NUM_WORK_ITEMS  = WORK_GROUP_SIZE * NUM_WORK_GROUPS;
+        cgh.parallel_for<class DeDupe>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
+                                                         sycl::range<1>{WORK_GROUP_SIZE}},
+        [=](sycl::nd_item<1> my_item) {
+            // have worker 0 load my offset and size into local memory, and set num de-dupes to zero
+            if(my_item.get_local_id()[0] == 0) {
+                offset[0] = out_worklist_offsets[my_item.get_group(0)];
+                size[0] = out_worklist_sizes[my_item.get_group(0)];
+                num_dedupes[0].store(0);
+                wl_substitute_index[0].store(offset[0] + size[0] - 1);
+            }
+            my_item.barrier(sycl::access::fence_space::local_space);
+
+            // load offset and size into private memory
+            gpu_size_t my_offset = offset[0],
+                       my_size = size[0];
+            // look to see if I am responsible for any dupes 
+            for(gpu_size_t i = my_item.get_local_id()[0];
+                i < my_size - num_dedupes[0].load();
+                i += WORK_GROUP_SIZE)
+            {
+                // If I am a dupe, increase the dupe count
+                if(owner[out_worklist[my_offset + i]] != my_item.get_global_id()[0]) {
+                    num_dedupes[0].fetch_add(1);
+                }
+                // Try to substitute a non-dupe from the end of the list
+                size_t desired_owner = my_item.get_global_id()[0];
+                size_t wl_index = my_offset + i;
+                while(owner[out_worklist[wl_index]] != desired_owner) {
+                    wl_index = wl_substitute_index[0].fetch_sub(1);
+                    // If the substitution index is out of bounds or
+                    // not an index after me, then there was no valid
+                    // substitute.
+                    if(wl_index <= my_offset + i || wl_index >= my_offset + my_size) {
+                        break;
+                    }
+                    // Otherwise, figure out who would own the substitue if the
+                    // substitue were not a dupe
+                    desired_owner = (wl_index - my_offset - i
+                                     + my_item.get_global_id()[0]) % WORK_GROUP_SIZE;
+                }
+            }
+            // Once everyone is done in my group, reduce the group size appropriately!
+            my_item.barrier(sycl::access::fence_space::local_space);
+            if(my_item.get_local_id()[0] == 0) {
+                out_worklist_sizes[my_item.get_group(0)] -= num_dedupes[0].load();
+            }
+        });
+    });
+}
 
 #endif
