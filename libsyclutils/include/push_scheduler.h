@@ -1,6 +1,6 @@
 #include <CL/sycl.hpp>
 //
-// SYCL_CSR_Graph node_data_type index_type
+// SYCL_CSR_Graph index_type
 #include "sycl_csr_graph.h"
 // Pipe
 #include "pipe.h"
@@ -20,7 +20,11 @@ extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
 // "derive" from this class using the
 // curiously recurring template pattern as described in
 // https://developer.codeplay.com/products/computecpp/ce/guides/sycl-guide/limitations
-template <class PushOperator>
+//
+// The OperatorInfo class can be used by the PushOperator as a way of carrying
+// extra data. The PushScheduler will use the copy constructor to
+// make its own copy.
+template <class PushOperator, class OperatorInfo>
 class PushScheduler {
     protected:
     const gpu_size_t NNODES,
@@ -46,11 +50,6 @@ class PushScheduler {
                        // read-access to the CSR graph
                        row_start,
                        edge_dst;
-    sycl::accessor<node_data_type, 1,
-                   sycl::access::mode::read_write,
-                   sycl::access::target::global_buffer>
-                       // read-write access to the data of node
-                       node_data;
     sycl::accessor<bool, 1,
                    sycl::access::mode::read_write,
                    sycl::access::target::global_buffer>
@@ -84,6 +83,8 @@ class PushScheduler {
                    sycl::access::target::local>
                        // fine-grained scheduling queue size
                        num_fine_grained_edges;
+    // Operator-specific information
+    OperatorInfo opInfo;
 
     // scheduling methods
     /**
@@ -149,7 +150,8 @@ class PushScheduler {
 
     public:
         PushScheduler(SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
-                      sycl::buffer<bool, 1> &out_worklist_needs_compression_buf) 
+                      sycl::buffer<bool, 1> &out_worklist_needs_compression_buf,
+                      OperatorInfo &operatorInfo) 
             // This cast is okay because sycl_driver does a check
             // TODO: we should probably also do a check here though for safety?
             : NNODES{ (gpu_size_t) sycl_graph.nnodes }
@@ -160,7 +162,6 @@ class PushScheduler {
             // CSR Graph in memory
             , row_start{ sycl_graph.row_start, cgh }
             , edge_dst { sycl_graph.edge_dst , cgh }
-            , node_data{ sycl_graph.node_data, cgh }
             , out_worklist_needs_compression{ out_worklist_needs_compression_buf, cgh }
             // group-local memory
             , group_src_nodes  { sycl::range<1>{WORK_GROUP_SIZE}, cgh }
@@ -173,6 +174,8 @@ class PushScheduler {
             , warp_still_has_work{ sycl::range<1>{1}, cgh }
             , out_worklist_full  { sycl::range<1>{1}, cgh }
             , num_fine_grained_edges{ sycl::range<1>{1}, cgh }
+            // operator-specific information
+            , opInfo{ operatorInfo }
         { }
 
     // SYCL Kernel
@@ -190,9 +193,9 @@ class PushScheduler {
 };
 
 /// Group Scheduling //////////////////////////////////////////////////////////
-template <class PushOperator>
-void PushScheduler<PushOperator>::group_scheduling(const sycl::nd_item<1> &my_item,
-                                                   index_type &my_work_left)
+template <class PushOperator, class OperatorInfo>
+void PushScheduler<PushOperator, OperatorInfo>::group_scheduling(const sycl::nd_item<1> &my_item,
+                                                                 index_type &my_work_left)
 {
     my_item.barrier(sycl::access::fence_space::local_space);
     // Initialize work_node to its invalid value
@@ -239,9 +242,9 @@ void PushScheduler<PushOperator>::group_scheduling(const sycl::nd_item<1> &my_it
 
 
 /// Warp Scheduling ///////////////////////////////////////////////////////////
-template <class PushOperator>
-void PushScheduler<PushOperator>::warp_scheduling(const sycl::nd_item<1> &my_item,
-                                                  index_type &my_work_left)
+template <class PushOperator, class OperatorInfo>
+void PushScheduler<PushOperator, OperatorInfo>::warp_scheduling(const sycl::nd_item<1> &my_item,
+                                                                index_type &my_work_left)
 {
     my_item.barrier(sycl::access::fence_space::local_space);
     // set up for warp scheduling
@@ -300,11 +303,11 @@ void PushScheduler<PushOperator>::warp_scheduling(const sycl::nd_item<1> &my_ite
 
 
 /// fine-grainedScheduling ////////////////////////////////////////////////////
-template <class PushOperator>
-void PushScheduler<PushOperator>::fine_grained_scheduling(const sycl::nd_item<1> &my_item,
-                                                          index_type &my_work_left,
-                                                          index_type my_src_node,
-                                                          index_type my_first_edge)
+template <class PushOperator, class OperatorInfo>
+void PushScheduler<PushOperator, OperatorInfo>::fine_grained_scheduling(const sycl::nd_item<1> &my_item,
+                                                                        index_type &my_work_left,
+                                                                        index_type my_src_node,
+                                                                        index_type my_first_edge)
 {
     /// Setup /////////////////////////////////////////////////////////////////
     my_item.barrier(sycl::access::fence_space::global_and_local);
@@ -367,8 +370,8 @@ void PushScheduler<PushOperator>::fine_grained_scheduling(const sycl::nd_item<1>
 
 
 /// SYCL Kernel //////////////////////////////////////////////////////////////
-template <class PushOperator>
-void PushScheduler<PushOperator>::operator()(sycl::nd_item<1> my_item) {
+template <class PushOperator, class OperatorInfo>
+void PushScheduler<PushOperator, OperatorInfo>::operator()(sycl::nd_item<1> my_item) {
     // Get my global and local ids
     sycl::id<1> my_global_id = my_item.get_global_id(),
                 my_local_id = my_item.get_local_id();

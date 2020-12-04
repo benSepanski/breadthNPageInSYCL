@@ -31,21 +31,41 @@ const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
              NUM_WORK_ITEMS  = NUM_WORK_GROUPS * WORK_GROUP_SIZE,
              WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
 
+struct BFSOperatorInfo {
+    node_data_type level;
+    sycl::accessor<node_data_type, 1,
+                   sycl::access::mode::read_write,
+                   sycl::access::target::global_buffer>
+                       node_data;
+
+    /** Constructor **/
+    BFSOperatorInfo( SYCL_CSR_Graph &sycl_graph, sycl::handler &cgh, node_data_type level ) 
+        : node_data{ sycl_graph.node_data, cgh }
+        , level{ level }
+    { }
+    /** We must provide a copy constructor */
+    BFSOperatorInfo( const BFSOperatorInfo &that )
+        : node_data{ that.node_data }
+        , level{ that.level }
+    { }
+};
+
 
 // Define our BFS push operator
-class BFSIter : public PushScheduler<BFSIter> {
+class BFSIter : public PushScheduler<BFSIter, BFSOperatorInfo> {
     public:
     BFSIter(SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
-            sycl::buffer<bool, 1> &out_worklist_needs_compression)
-        : PushScheduler{sycl_graph, pipe, cgh, out_worklist_needs_compression}
+            sycl::buffer<bool, 1> &out_worklist_needs_compression,
+            BFSOperatorInfo &opInfo)
+        : PushScheduler{sycl_graph, pipe, cgh, out_worklist_needs_compression, opInfo}
         { }
 
     void applyPushOperator(sycl::nd_item<1> my_item, index_type src_node, index_type edge_index) {
         index_type dst_node = edge_dst[edge_index];
-        if(node_data[dst_node] == INF) {
+        if(opInfo.node_data[dst_node] == INF) {
             bool push_success = out_wl.push(my_item, dst_node);
             if(push_success) {
-                node_data[dst_node] = node_data[src_node] + 1;
+                opInfo.node_data[dst_node] = opInfo.level;
             }
             else {
                 out_worklist_full[0] = true;
@@ -106,7 +126,8 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     gpu_size_t in_wl_size = 1;
     while(in_wl_size > 0) {
         queue.submit([&]( sycl::handler &cgh) {
-            BFSIter current_iter(sycl_graph, wl_pipe, cgh, rerun_level_buf);
+            BFSOperatorInfo bfsInfo{ sycl_graph, cgh, level };
+            BFSIter current_iter(sycl_graph, wl_pipe, cgh, rerun_level_buf, bfsInfo);
             cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                sycl::range<1>{WORK_GROUP_SIZE}},
                              current_iter);
