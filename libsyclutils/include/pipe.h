@@ -205,7 +205,7 @@ class Pipe {
                 // and figure out my new offset and start
                 gpu_size_t start;
                 if(my_item.get_local_id()[0] == 0) {
-                    start = 0;
+                    start = out_worklist_offsets[0];
                     for(size_t wg = 0; wg < my_item.get_group(0); ++wg) {
                         start += out_worklist_sizes[wg];
                     }
@@ -247,7 +247,8 @@ class Pipe {
                 out_worklist_offsets[0] += first_offset_increase;
                 // Now divide up the remaining space into parts of the worklist for each
                 // work-group
-                gpu_size_t between_offsets = (WORKLIST_CAPACITY - out_worklist_offsets[0]) / NUM_WORK_GROUPS,
+                gpu_size_t between_offsets = (WORKLIST_CAPACITY - out_worklist_offsets[0]
+                                              + NUM_WORK_GROUPS - 1) / NUM_WORK_GROUPS,
                            offset = out_worklist_offsets[0];
                 for(gpu_size_t wg = 1; wg < NUM_WORK_GROUPS; ++wg) {
                     offset += between_offsets;
@@ -294,18 +295,6 @@ void Pipe::dedupe(sycl::queue &queue) {
             for(gpu_size_t i = my_item.get_local_id()[0]; i < my_size; i += WORK_GROUP_SIZE) {
                 owner[out_worklist[my_offset + i]] = my_item.get_global_id()[0];
             }
-        });
-    });
-    queue.submit([&](sycl::handler &cgh) {
-        sycl::stream sycl_stream(1024, 512, cgh);
-        const gpu_size_t NNODES = this->NNODES;
-        auto owner = this->owner_buf.get_access<sycl::access::mode::read>(cgh);
-        cgh.single_task<class PIPETEST>([=]() {
-            sycl_stream << "OWNERS: \n";
-            for(size_t i = 0; i < NNODES; ++i) {
-                sycl_stream << owner[i] << " ";
-            }
-            sycl_stream << sycl::endl;
         });
     });
     /// Next, de-dupe
