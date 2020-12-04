@@ -2,6 +2,8 @@
 
 // From libsyclutils
 //
+// THREAD_BLOCK_SIZE WARP_SIZE NUM_THREAD_BLOCKS
+#include "kernel_sizing.h"
 // SYCL_CSR_Graph node_data_type index_type
 #include "sycl_csr_graph.h"
 // Pipe
@@ -15,16 +17,9 @@ namespace sycl = cl::sycl;
 // class names for SYCL kernels
 class bfs_init;
 class wl_init;
-class DEBUG;
-class DEBUG2;
 
 // from support.cpp
 extern index_type start_node;
-
-// TODO: Make these extern consts which are determined by sycl_driver.cpp
-#define NUM_THREAD_BLOCKS 6
-#define THREAD_BLOCK_SIZE 256
-#define WARP_SIZE 32
 
 const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
              NUM_WORK_GROUPS = NUM_THREAD_BLOCKS,

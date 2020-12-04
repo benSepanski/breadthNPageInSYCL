@@ -1,13 +1,13 @@
 /*  -*- mode: c++ -*- */
 #include <CL/sycl.hpp>
 
+// WARP_SIZE THREAD_BLOCK_SIZE
+#include "kernel_sizing.h"
 // index_type
 #include "sycl_csr_graph.h"
 
 #ifndef BREADTHNPAGEINSYCL_LIBSYCLUTILS_PIPE_
 #define BREADTHNPAGEINSYCL_LIBSYCLUTILS_PIPE_
-
-#define THREAD_BLOCK_SIZE 256
 
 namespace sycl = cl::sycl;
 

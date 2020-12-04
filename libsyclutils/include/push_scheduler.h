@@ -1,5 +1,7 @@
 #include <CL/sycl.hpp>
 //
+// THREAD_BLOCK_SIZE WARP_SIZE NUM_THREAD_BLOCKS
+#include "kernel_sizing.h"
 // SYCL_CSR_Graph index_type
 #include "sycl_csr_graph.h"
 // Pipe
@@ -13,9 +15,6 @@ extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
 
 #ifndef BREADTHNPAGEINSYCL_LIBSYCLUTILS_PUSHSCHEDULER_
 #define BREADTHNPAGEINSYCL_LIBSYCLUTILS_PUSHSCHEDULER_
-
-#define THREAD_BLOCK_SIZE 256
-#define WARP_SIZE 32
 
 // "derive" from this class using the
 // curiously recurring template pattern as described in
@@ -31,7 +30,7 @@ class PushScheduler {
                      NEDGES,
                      // TODO: MAke these variable
                      WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
-                     NUM_WORK_GROUPS = 6,
+                     NUM_WORK_GROUPS = NUM_THREAD_BLOCKS,
                      NUM_WORK_ITEMS = NUM_WORK_GROUPS * WORK_GROUP_SIZE,
                      WARPS_PER_GROUP = (WORK_GROUP_SIZE + WARP_SIZE - 1) / WARP_SIZE,
                      // TODO: make these variable, and make sure

@@ -6,6 +6,8 @@
 
 // From libsyclutils
 //
+// THREAD_BLOCK_SIZE WARP_SIZE
+#include "kernel_sizing.h"
 // SYCL_CSR_Graph node_data_type index_type
 #include "sycl_csr_graph.h"
 
@@ -22,10 +24,6 @@ typedef uint32_t gpu_size_t;
 // defined here, but const so need to declare as extern so support.cpp
 // can use it
 extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
-
-// TODO: Make these extern consts which are determined by sycl_driver.cpp
-#define THREAD_BLOCK_SIZE 256
-#define WARP_SIZE 32
 
 // classes used to name SYCL kernels
 class bfs_init;
