@@ -296,8 +296,6 @@ void Pipe::dedupe(sycl::queue &queue) {
             }
         });
     });
-    queue.wait_and_throw();
-    std::cout << "FIRST HERE\n" << std::endl;
     queue.submit([&](sycl::handler &cgh) {
         sycl::stream sycl_stream(1024, 512, cgh);
         const gpu_size_t NNODES = this->NNODES;
@@ -310,8 +308,6 @@ void Pipe::dedupe(sycl::queue &queue) {
             sycl_stream << sycl::endl;
         });
     });
-    queue.wait_and_throw();
-    std::cout << "HERE\n" << std::endl;
     /// Next, de-dupe
     queue.submit([&](sycl::handler &cgh) {
         // global accessors
