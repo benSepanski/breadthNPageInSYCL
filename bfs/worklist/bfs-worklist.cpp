@@ -104,7 +104,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     bool rerun_level = false;
     sycl::buffer<bool, 1> rerun_level_buf(&rerun_level, sycl::range<1>{1});
     gpu_size_t in_wl_size = 1;
-    while(in_wl_size > 0 && level <= 1) {
+    while(in_wl_size > 0) {
         queue.submit([&]( sycl::handler &cgh) {
             BFSIter current_iter(sycl_graph, wl_pipe, cgh, rerun_level_buf);
             cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
