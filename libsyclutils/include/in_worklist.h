@@ -32,6 +32,13 @@ class InWorklist {
         , worklist_size{ pipe.get_in_worklist_size_buf(), cgh }
     { }
 
+    /**
+     * Get size
+     */
+    gpu_size_t getSize() const {
+        return this->worklist_size[0];
+    }
+
     /*
      * try to store the *index*th item of the worklist into node.
      *
