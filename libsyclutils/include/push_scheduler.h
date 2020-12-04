@@ -163,11 +163,11 @@ class PushScheduler {
             , node_data{ sycl_graph.node_data, cgh }
             , out_worklist_needs_compression{ out_worklist_needs_compression_buf, cgh }
             // group-local memory
-            , group_src_nodes  { sycl::range<1>{NUM_WORK_GROUPS}, cgh }
-            , group_first_edges{ sycl::range<1>{NUM_WORK_GROUPS}, cgh }
-            , group_last_edges { sycl::range<1>{NUM_WORK_GROUPS}, cgh }
+            , group_src_nodes  { sycl::range<1>{WORK_GROUP_SIZE}, cgh }
+            , group_first_edges{ sycl::range<1>{WORK_GROUP_SIZE}, cgh }
+            , group_last_edges { sycl::range<1>{WORK_GROUP_SIZE}, cgh }
             , group_work_node{ sycl::range<1>{1}, cgh}
-            , warp_work_node { sycl::range<1>{1}, cgh}
+            , warp_work_node { sycl::range<1>{WARPS_PER_GROUP}, cgh}
             , fine_grained_src_nodes{ sycl::range<1>{FINE_GRAINED_EDGE_CAPACITY}, cgh }
             , fine_grained_edges    { sycl::range<1>{FINE_GRAINED_EDGE_CAPACITY}, cgh }
             , warp_still_has_work{ sycl::range<1>{1}, cgh }
@@ -415,7 +415,7 @@ void PushScheduler<PushOperator>::operator()(sycl::nd_item<1> my_item) {
             break;
         }
     }
-    my_item.barrier(sycl::access::fence_space::local_space);
+    my_item.barrier(sycl::access::fence_space::global_and_local);
     if(my_local_id[0] == 0) {
         out_wl.publishLocalMemory(my_item);
         if(out_worklist_full[0]) {

@@ -123,7 +123,7 @@ class OutWorklist {
     bool push(const sycl::nd_item<1> &my_item, index_type node) const {
         gpu_size_t wl_index = my_offset[0] + my_size[0].fetch_add(1);
         // If full, return false and don't store
-        if(wl_index >= next_offset[0]) {
+        if(wl_index >= next_offset[0] || wl_index < my_offset[0]) {
             my_size[0].store(next_offset[0] - my_offset[0]);
             return false;
         }
