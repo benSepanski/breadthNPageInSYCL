@@ -15,6 +15,8 @@ namespace sycl = cl::sycl;
 // class names for SYCL kernels
 class bfs_init;
 class wl_init;
+class DEBUG;
+class DEBUG2;
 
 // from support.cpp
 extern index_type start_node;
@@ -103,25 +105,23 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     sycl::buffer<bool, 1> rerun_level_buf(&rerun_level, sycl::range<1>{1});
     gpu_size_t in_wl_size = 1;
     while(in_wl_size > 0) {
-        std::cout << "level " << level << ": worklist size: " << in_wl_size << std::endl;
         queue.submit([&] (sycl::handler &cgh) {
-            BFSIter current_iter(sycl_graph, wl_pipe, cgh, rerun_level_buf);
-            cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
-                                               sycl::range<1>{WORK_GROUP_SIZE}},
-                             current_iter);
+            OutWorklist out_wl(wl_pipe, cgh);
+            sycl::stream str(1024, 512, cgh);
+            // We need an nd_item to push, so have to use this instead of single_task
+            cgh.single_task<class DEBUG>( [=]() {
+                out_wl.print(str);
+            });
         });
+
         wl_pipe.compress(queue);
         {
             auto rerun_level_acc = rerun_level_buf.get_access<sycl::access::mode::read_write>();
             if(!rerun_level_acc[0]) {
-                std::cout << "NEXT LEVEL:\n";
                 level++;
                 wl_pipe.swapSlots(queue);
                 auto in_wl_size_acc = wl_pipe.get_in_worklist_size_buf().get_access<sycl::access::mode::read>();
                 in_wl_size = in_wl_size_acc[0];
-            }
-            else {
-                std::cout << "COMPRESS & RERUN\n";
             }
             rerun_level_acc[0] = false;
         }

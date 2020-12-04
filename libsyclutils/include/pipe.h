@@ -121,8 +121,8 @@ class Pipe {
                 const gpu_size_t WORKLIST_CAPACITY = this->WORKLIST_CAPACITY;
                 // accessors
                 auto in_worklist_size = this->in_worklist_size_buf.get_access<sycl::access::mode::write>(cgh);
-                auto out_worklist_sizes = this->out_worklist_sizes_buf.get_access<sycl::access::mode::read_write>(cgh);
-                auto out_worklist_offsets = this->out_worklist_offsets_buf.get_access<sycl::access::mode::read_write>(cgh);
+                auto out_worklist_sizes = this->out_worklist_sizes_buf.get_access<sycl::access::mode::write>(cgh);
+                auto out_worklist_offsets = this->out_worklist_offsets_buf.get_access<sycl::access::mode::write>(cgh);
 
                 cgh.single_task<class InitializeWorklists>([=]() {
                     in_worklist_size[0] = 0;
@@ -149,7 +149,7 @@ class Pipe {
                 const gpu_size_t WORKLIST_CAPACITY = this->WORKLIST_CAPACITY;
                 // accessors
                 auto in_worklist_size = this->in_worklist_size_buf.get_access<sycl::access::mode::write>(cgh);
-                auto out_worklist_sizes = this->out_worklist_sizes_buf.get_access<sycl::access::mode::read_write>(cgh);
+                auto out_worklist_sizes = this->out_worklist_sizes_buf.get_access<sycl::access::mode::write>(cgh);
                 auto out_worklist_offsets = this->out_worklist_offsets_buf.get_access<sycl::access::mode::read_write>(cgh);
 
                 cgh.single_task<class SwapWorklists>([=]() {
@@ -221,7 +221,7 @@ class Pipe {
                 start = compressed_start[0];
                 gpu_size_t my_group_size = size[0],
                            my_group_offset = offset[0];
-                for(gpu_size_t index = 0; index < my_group_size; index += WORK_GROUP_SIZE) 
+                for(gpu_size_t index = my_item.get_local_id()[0]; index < my_group_size; index += WORK_GROUP_SIZE) 
                 {
                     out_worklist[start + index] = out_worklist[my_group_offset + index];
                 }
@@ -300,7 +300,7 @@ void Pipe::dedupe(sycl::queue &queue) {
     /// Next, de-dupe
     queue.submit([&](sycl::handler &cgh) {
         // global accessors
-        auto owner = this->owner_buf.get_access<sycl::access::mode::read>(cgh);
+        auto owner = this->owner_buf.get_access<sycl::access::mode::read_write>(cgh);
         auto out_worklist = this->out_worklist_buf->get_access<sycl::access::mode::read_write>(cgh);
         auto out_worklist_sizes = this->out_worklist_sizes_buf.get_access<sycl::access::mode::read_write>(cgh);
         auto out_worklist_offsets = this->out_worklist_offsets_buf.get_access<sycl::access::mode::read>(cgh);
@@ -316,7 +316,7 @@ void Pipe::dedupe(sycl::queue &queue) {
                        sycl::access::mode::atomic,
                        sycl::access::target::local>
                            // number of dupes de-duped so far
-                           num_dedupes{sycl::range<1>{1}, cgh},
+                           num_dupes{sycl::range<1>{1}, cgh},
                            // where to substitute from when we found a dupe
                            wl_substitute_index{sycl::range<1>{1}, cgh};
 
@@ -329,7 +329,7 @@ void Pipe::dedupe(sycl::queue &queue) {
             if(my_item.get_local_id()[0] == 0) {
                 offset[0] = out_worklist_offsets[my_item.get_group(0)];
                 size[0] = out_worklist_sizes[my_item.get_group(0)];
-                num_dedupes[0].store(0);
+                num_dupes[0].store(0);
                 wl_substitute_index[0].store(offset[0] + size[0] - 1);
             }
             my_item.barrier(sycl::access::fence_space::local_space);
@@ -337,36 +337,41 @@ void Pipe::dedupe(sycl::queue &queue) {
             // load offset and size into private memory
             gpu_size_t my_offset = offset[0],
                        my_size = size[0];
-            // look to see if I am responsible for any dupes 
-            for(gpu_size_t i = my_item.get_local_id()[0];
-                i < my_size - num_dedupes[0].load();
-                i += WORK_GROUP_SIZE)
-            {
-                // If I am a dupe, increase the dupe count
+            // count the number of dupes
+            for(gpu_size_t i = my_item.get_local_id()[0]; i < my_size; i += WORK_GROUP_SIZE) {
                 if(owner[out_worklist[my_offset + i]] != my_item.get_global_id()[0]) {
-                    num_dedupes[0].fetch_add(1);
+                    num_dupes[0].fetch_add(1);
                 }
-                // Try to substitute a non-dupe from the end of the list
+            }
+            // wait for count to finalize
+            my_item.barrier(sycl::access::fence_space::local_space);
+            gpu_size_t dupe_count = num_dupes[0].load();
+            // de-dupe: If I am a duplicate and not in the last dupe_count
+            //          entries, then I need to swap into one of those entries.
+            for(gpu_size_t i = my_item.get_local_id()[0]; i < my_size - dupe_count; i += WORK_GROUP_SIZE) {
+                // If I am a dupe, find a non-dupe on the tail to swap with 
                 size_t desired_owner = my_item.get_global_id()[0];
                 size_t wl_index = my_offset + i;
                 while(owner[out_worklist[wl_index]] != desired_owner) {
+                    // get next index on tail
                     wl_index = wl_substitute_index[0].fetch_sub(1);
-                    // If the substitution index is out of bounds or
-                    // not an index after me, then there was no valid
-                    // substitute.
-                    if(wl_index <= my_offset + i || wl_index >= my_offset + my_size) {
+                    // If we are out of the tail, break! nothing we can do
+                    if(wl_index < my_offset + my_size - dupe_count || wl_index >= my_offset + my_size) {
                         break;
                     }
-                    // Otherwise, figure out who would own the substitue if the
-                    // substitue were not a dupe
-                    desired_owner = (wl_index - my_offset - i
-                                     + my_item.get_global_id()[0]) % WORK_GROUP_SIZE;
+                    desired_owner = (wl_index - my_offset) % WORK_GROUP_SIZE
+                                    + my_item.get_global_id()[0]
+                                    - my_item.get_local_id()[0];
+                    // If I found a non-dupe on the tail, take it as my own!
+                    if(owner[out_worklist[wl_index]] == desired_owner) {
+                        out_worklist[my_offset+i] = out_worklist[wl_index];
+                    }
                 }
             }
             // Once everyone is done in my group, reduce the group size appropriately!
             my_item.barrier(sycl::access::fence_space::local_space);
             if(my_item.get_local_id()[0] == 0) {
-                out_worklist_sizes[my_item.get_group(0)] -= num_dedupes[0].load();
+                out_worklist_sizes[my_item.get_group(0)] -= dupe_count;
             }
         });
     });
