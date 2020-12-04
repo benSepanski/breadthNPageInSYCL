@@ -104,14 +104,12 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     bool rerun_level = false;
     sycl::buffer<bool, 1> rerun_level_buf(&rerun_level, sycl::range<1>{1});
     gpu_size_t in_wl_size = 1;
-    while(in_wl_size > 0) {
-        queue.submit([&] (sycl::handler &cgh) {
-            OutWorklist out_wl(wl_pipe, cgh);
-            sycl::stream str(1024, 512, cgh);
-            // We need an nd_item to push, so have to use this instead of single_task
-            cgh.single_task<class DEBUG>( [=]() {
-                out_wl.print(str);
-            });
+    while(in_wl_size > 0 && level <= 1) {
+        queue.submit([&]( sycl::handler &cgh) {
+            BFSIter current_iter(sycl_graph, wl_pipe, cgh, rerun_level_buf);
+            cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
+                                               sycl::range<1>{WORK_GROUP_SIZE}},
+                             current_iter);
         });
 
         wl_pipe.compress(queue);
