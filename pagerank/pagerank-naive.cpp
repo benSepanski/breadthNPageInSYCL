@@ -22,9 +22,7 @@ namespace sycl = cl::sycl;
 
 // class names for SYCL kernels
 class init;
-class init_on_out_wl;
 class prob_update;
-class res_reset;
 
 const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
              NUM_WORK_GROUPS = NUM_THREAD_BLOCKS,
@@ -44,11 +42,6 @@ struct PROperatorInfo {
                    sycl::access::target::global_buffer>
                        // update coming out of this node
                        outgoing_update;
-    sycl::accessor<bool, 1,
-                   sycl::access::mode::read_write,
-                   sycl::access::target::global_buffer>
-                       // Is this node on the out-worklist?
-                       on_out_wl;
     sycl::accessor<size_t, 1,
                    sycl::access::mode::read_write,
                    sycl::access::target::global_buffer>
@@ -64,12 +57,10 @@ struct PROperatorInfo {
     /** Constructor **/
     PROperatorInfo( sycl::buffer<float, 2> &residuals_by_group_buf,
                     sycl::buffer<float, 1> &outgoing_update_buf,
-                    sycl::buffer<bool, 1> &on_out_wl_buf,
                     sycl::buffer<size_t, 1> &mutex_buf,
                     sycl::handler &cgh ) 
         : residuals_by_group{ residuals_by_group_buf, cgh }
         , outgoing_update{ outgoing_update_buf, cgh }
-        , on_out_wl{ on_out_wl_buf, cgh }
         , mutex{ mutex_buf, cgh }
         , bids_made{ sycl::range<1>{1}, cgh }
     { }
@@ -77,7 +68,6 @@ struct PROperatorInfo {
     PROperatorInfo( const PROperatorInfo &that )
         : residuals_by_group{ that.residuals_by_group }
         , outgoing_update{ that.outgoing_update }
-        , on_out_wl{ that.on_out_wl }
         , mutex{ that.mutex }
         , bids_made{ that.bids_made }
     { }
@@ -93,6 +83,7 @@ class PRIter : public PushScheduler<PRIter, PROperatorInfo> {
         : PushScheduler{sycl_graph, pipe, cgh, out_worklist_needs_compression, opInfo}
         { }
 
+    // Do a page-rank update, but don't use the out-waitlist!
     void applyPushOperator(const sycl::nd_item<1> &my_item,
                            index_type src_node,
                            index_type edge_index) 
@@ -114,7 +105,7 @@ class PRIter : public PushScheduler<PRIter, PROperatorInfo> {
                 opInfo.bids_made[0] = true;
             }
             // wait for bids to finalize...
-            my_item.barrier(sycl::access::fence_space::global_and_local);
+            my_item.barrier();
             // If nobody has work to do, great! we're done.
             if(!opInfo.bids_made[0]) {
                 break;
@@ -122,30 +113,13 @@ class PRIter : public PushScheduler<PRIter, PROperatorInfo> {
             opInfo.bids_made[0] = false;
             // If I have stuff to do and got my mutex, do my work!
             if(edge_index < NEDGES && opInfo.mutex[dst_node] == my_item.get_global_id()[0]) {
-                sycl::id<2> target_id(dst_node, my_item.get_group(0));
-                float prev = opInfo.residuals_by_group[target_id],
-                      update = opInfo.outgoing_update[src_node];
-                opInfo.residuals_by_group[target_id] += update;
-                // if we don't already have this on the queue and we raised it above
-                // the threshold that it may need to be worked on next time, put
-                // the destination node on the queue!
-                bool was_below_eps = (prev < EPSILON / NUM_WORK_GROUPS),
-                     now_above_eps = (prev + update >= EPSILON / NUM_WORK_GROUPS);
-                if(was_below_eps && now_above_eps && !opInfo.on_out_wl[dst_node]) {
-                    bool push_success = out_wl.push(dst_node);
-                    if(!push_success) {
-                        out_worklist_full[0] = true;
-                    }
-                    else {
-                        opInfo.on_out_wl[dst_node] = true;
-                    }
-                }
+                opInfo.residuals_by_group[dst_node][my_item.get_group(0)] += opInfo.outgoing_update[src_node];
                 // I got to do my work! so I'm done
                 edge_index = NEDGES;
                 dst_node = NNODES;
             }
             // Now wait for everyone's updates to finalize
-            my_item.barrier(sycl::access::fence_space::global_and_local);
+            my_item.barrier();
         }
     }
 };
@@ -228,103 +202,80 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
             for(index_type node = my_item.get_global_id()[0]; node < NNODES; node += NUM_WORK_ITEMS) {
                 outgoing_update[node] = ALPHA * (1-ALPHA) / (row_start[node+1] - row_start[node]);
             }
-        });
-    });
+    }); });
 
     // local copy of in-worklist size
     gpu_size_t in_wl_size = sycl_graph.nnodes;
-    // does out-worklist needs to compress and re-try the iteration?
-    bool rerun = false, rerun_local_copy = false;
-    sycl::buffer<bool, 1> rerun_buf(&rerun, sycl::range<1>{1});
-    // which nodes are already on the out-worklist buffer (if
-    // we are retrying the iteration, we need to get new nodes on)
-    sycl::buffer<bool, 1> on_out_wl_buf(sycl::range<1>{sycl_graph.nnodes});
-    // make sure on_out_wl_buf starts out as false
-    queue.submit([&](sycl::handler &cgh) {
-        const size_t NNODES = sycl_graph.nnodes;
-        auto on_out_wl = on_out_wl_buf.get_access<sycl::access::mode::discard_write>(cgh);
-        cgh.parallel_for<class init_on_out_wl>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
-                                                                 sycl::range<1>{WORK_GROUP_SIZE}},
-        [=](sycl::nd_item<1> my_item) {
-            for(size_t node = my_item.get_global_id()[0]; node < NNODES; node += NUM_WORK_ITEMS) {
-                on_out_wl[node] = false;
-            }
-    });});
-
+    // Used by PushScheduler to tell if you need to retry.
+    // Our PR doesn't put anything on the WL, so we just need
+    // a dummy variable
+    sycl::buffer<bool, 1> rerun_buf(sycl::range<1>{1});
     // begin pagerank
     while(in_wl_size > 0 && ++iterations <= MAX_ITERATIONS) {
         // Run an iteration of pagerank
+        // (note this doesn't put anything on the out-worklist)
         queue.submit([&](sycl::handler &cgh) {
-            PROperatorInfo prInfo( res_buf, outgoing_update_buf, on_out_wl_buf, mutex_buf, cgh );
+            PROperatorInfo prInfo( res_buf, outgoing_update_buf, mutex_buf, cgh );
             PRIter currentIter( sycl_graph, wl_pipe, cgh, rerun_buf, prInfo );
             cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                sycl::range<1>{WORK_GROUP_SIZE}},
                              currentIter);
         });
-        // compress out-worklist
-        wl_pipe.compress(queue);
-        // Either setup for a re-run, or swap slots and get new in-worklist size
-        {
-            auto rerun_acc = rerun_buf.get_access<sycl::access::mode::read_write>();
-            rerun_local_copy = rerun_acc[0];
-            if(rerun_acc[0]) {
-                iterations--;
-                rerun_acc[0] = false;
-            }
-            else {
-                wl_pipe.swapSlots(queue);
-                sycl::buffer<gpu_size_t, 1> in_wl_size_buf = wl_pipe.get_in_worklist_size_buf();
-                auto in_wl_size_acc = in_wl_size_buf.get_access<sycl::access::mode::read>();
-                in_wl_size = in_wl_size_acc[0];
-            }
-        }
-        // If not re-running due to a full out-worklist...
-        if(!rerun_local_copy) {
-            // Update probabilities and reset residuals and outgoing updates
-            queue.submit([&](sycl::handler &cgh) {
-                // graph
-                const size_t NNODES = sycl_graph.nnodes;
-                auto row_start = sycl_graph.row_start.get_access<sycl::access::mode::read>(cgh);
-                // residual, updates, and probs
-                auto res = res_buf.get_access<sycl::access::mode::read_write>(cgh);
-                auto outgoing_update = outgoing_update_buf.get_access<sycl::access::mode::discard_write>(cgh);
-                auto probs = P_CURR_buf.get_access<sycl::access::mode::read_write>(cgh);
-                // nobody is on the queue anymore
-                auto on_out_wl = on_out_wl_buf.get_access<sycl::access::mode::discard_write>(cgh);
+        // Update probabilities and reset residuals and outgoing updates.
+        // If anything gets update by >= epsilon, put it on the out-worklist.
+        // This will always work since each group handles NNODES / NUM_WORK_GROUPS nodes,
+        // so won't run out of space
+        queue.submit([&](sycl::handler &cgh) {
+            // graph and worklists
+            const size_t NNODES = sycl_graph.nnodes;
+            auto row_start = sycl_graph.row_start.get_access<sycl::access::mode::read>(cgh);
+            OutWorklist out_wl(wl_pipe, cgh);
+            // residual, updates, and probs
+            auto res = res_buf.get_access<sycl::access::mode::read_write>(cgh);
+            auto outgoing_update = outgoing_update_buf.get_access<sycl::access::mode::discard_write>(cgh);
+            auto probs = P_CURR_buf.get_access<sycl::access::mode::read_write>(cgh);
 
-                cgh.parallel_for<class prob_update>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
-                                                                      sycl::range<1>{WORK_GROUP_SIZE}},
-                [=](sycl::nd_item<1> my_item) {
-                    for(size_t node = my_item.get_global_id()[0]; node < NNODES; node += NUM_WORK_ITEMS) {
-                        // figure out total residual and add it to the prob
-                        float total_residual = 0;
-                        for(gpu_size_t wg = 0; wg < NUM_WORK_GROUPS; ++wg) {
-                            total_residual += res[node][wg];
-                            res[node][wg] = 0;
-                        }
-                        probs[node] += total_residual;
-                        // store the total residual, scaled appropriately, for
-                        // future updates
-                        index_type src_degree = row_start[node+1] - row_start[node];
-                        outgoing_update[node] = total_residual * ALPHA / src_degree;
-                        on_out_wl[node] = false;
+            cgh.parallel_for<class prob_update>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
+                                                                  sycl::range<1>{WORK_GROUP_SIZE}},
+            [=](sycl::nd_item<1> my_item) {
+                // set up out worklist's local memory
+                if(my_item.get_local_id()[0] == 0) {
+                    out_wl.initializeLocalMemory(my_item);
+                }
+                my_item.barrier();
+
+                for(size_t node = my_item.get_global_id()[0]; node < NNODES; node += NUM_WORK_ITEMS) {
+                    // figure out total residual and add it to the prob
+                    float total_residual = 0;
+                    for(gpu_size_t wg = 0; wg < NUM_WORK_GROUPS; ++wg) {
+                        total_residual += res[node][wg];
+                        res[node][wg] = 0;
                     }
-            }); });
-        }
-        // If re-running due to a full out-worklist, reset the residuals
-        else {
-            queue.submit([&](sycl::handler &cgh) {
-                const size_t NNODES = sycl_graph.nnodes;
-                auto res = res_buf.get_access<sycl::access::mode::read_write>(cgh);
-
-                cgh.parallel_for<class res_reset>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
-                                                                    sycl::range<1>{WORK_GROUP_SIZE}},
-                [=](sycl::nd_item<1> my_item) {
-                    for(size_t node = my_item.get_global_id()[0]; node < NNODES; node += NUM_WORK_ITEMS) {
-                        for(gpu_size_t wg = 0; wg < NUM_WORK_GROUPS; ++wg) {
-                            res[node][wg] = 0.0;
-                    } }
-            }); });
+                    probs[node] += total_residual;
+                    // if change was big enough, put it on the out-worklist
+                    if(total_residual > EPSILON) {
+                        out_wl.push(node);
+                    }
+                    // store the total residual, scaled appropriately, for
+                    // future updates
+                    index_type src_degree = row_start[node+1] - row_start[node];
+                    outgoing_update[node] = total_residual * ALPHA / src_degree;
+                }
+                // make sure out-worklist publishes its local memory
+                my_item.barrier();
+                if(my_item.get_local_id()[0] == 0) {
+                    out_wl.publishLocalMemory(my_item);
+                }
+        }); });
+        // Swap slots
+        wl_pipe.compress(queue);
+        wl_pipe.swapSlots(queue);
+        // Get in-worklist size (inside a new scope so that the
+        //                       host accessor gets destroyed)
+        {
+            sycl::buffer<gpu_size_t, 1> in_wl_size_buf = wl_pipe.get_in_worklist_size_buf();
+            auto in_wl_size_acc = in_wl_size_buf.get_access<sycl::access::mode::read>();
+            in_wl_size = in_wl_size_acc[0];
         }
     }
 }
