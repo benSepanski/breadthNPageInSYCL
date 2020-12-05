@@ -23,6 +23,9 @@ extern const uint64_t INF = std::numeric_limits<uint64_t>::max();
 // The OperatorInfo class can be used by the PushOperator as a way of carrying
 // extra data. The PushScheduler will use the copy constructor to
 // make its own copy.
+// The PushScheduler calls OperatorInfo's initialize(nd_item<1>) method at
+// the beginning of scheduling.
+//
 template <class PushOperator, class OperatorInfo>
 class PushScheduler {
     protected:
@@ -183,11 +186,22 @@ class PushScheduler {
     /**
      * Apply the push operator along an edge
      *
+     * Note: it is not guaranteed that all threads call this function
+     *       each time it is called
+     *
+     * my_item: my sycl work-item 
      * src_node: the source node of the edge
      * current_edge: the edge index
+     * degree: degree of the src node
+     * last_edge: the edge index after the last edge of the source node
      */
-    void applyPushOperator(sycl::nd_item<1> my_item, index_type src_node, index_type current_edge) {
-        static_cast<PushOperator&>(*this).applyPushOperator(my_item, src_node, current_edge);
+    void applyPushOperator(const sycl::nd_item<1> &my_item,
+                           index_type src_node,
+                           index_type current_edge) 
+    {
+        static_cast<PushOperator&>(*this).applyPushOperator(my_item,
+                                                            src_node,
+                                                            current_edge);
     };
 };
 
@@ -227,9 +241,10 @@ void PushScheduler<PushOperator, OperatorInfo>::group_scheduling(const sycl::nd_
 
         // Now work on the work_node's out-edges in batches of
         // size WORK_GROUP_SIZE
-        index_type current_edge = group_first_edges[work_node] + my_item.get_local_id()[0],
+        index_type   first_edge = group_first_edges[work_node],
                       last_edge = group_last_edges[work_node],
-                       src_node = group_src_nodes[work_node];
+                       src_node = group_src_nodes[work_node],
+                   current_edge = first_edge + my_item.get_local_id()[0];
         while( current_edge < last_edge ) {
             applyPushOperator(my_item, src_node, current_edge);
             current_edge += WORK_GROUP_SIZE;
@@ -288,9 +303,10 @@ void PushScheduler<PushOperator, OperatorInfo>::warp_scheduling(const sycl::nd_i
 
         // Now work on the work_node's out-edges in batches of
         // size WARP_SIZE 
-        index_type current_edge = group_first_edges[work_node] + my_warp_local_id,
+        index_type   first_edge = group_first_edges[work_node],
                       last_edge = group_last_edges[work_node],
-                       src_node = group_src_nodes[work_node];
+                       src_node = group_src_nodes[work_node],
+                   current_edge = first_edge + my_warp_local_id;
         while( current_edge < last_edge ) {
             applyPushOperator(my_item, src_node, current_edge);
             current_edge += WARP_SIZE;
@@ -346,7 +362,7 @@ void PushScheduler<PushOperator, OperatorInfo>::fine_grained_scheduling(const sy
             // get the edge I'm supposed to work on and reset it to an invalid value
             // for next time
             index_type edge_index = fine_grained_edges[j],
-                        src_node  = fine_grained_src_nodes[j];
+                        src_node = fine_grained_src_nodes[j];
             fine_grained_edges[j] = NEDGES;
             // If I got an invalid edge, skip
             if(edge_index >= NEDGES) {
@@ -378,7 +394,9 @@ void PushScheduler<PushOperator, OperatorInfo>::operator()(sycl::nd_item<1> my_i
         out_wl.initializeLocalMemory(my_item);
         out_worklist_full[0] = false;
     }
-    my_item.barrier(sycl::access::fence_space::local_space);
+    // Initialize operator info
+    opInfo.initialize(my_item);
+    my_item.barrier(sycl::access::fence_space::global_and_local);
     // now iterate through the worklist (making sure that if anyone
     //                                   in my group has work, then
     //                                   I join in to help)

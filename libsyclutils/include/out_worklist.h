@@ -120,7 +120,7 @@ class OutWorklist {
      * NOTE: This isn't *really* const because it modifies the worklist,
      *       but we have to declare it as const for SYCL compilation
      */
-    bool push(const sycl::nd_item<1> &my_item, index_type node) const {
+    bool push(index_type node) const {
         gpu_size_t wl_index = my_offset[0] + my_size[0].fetch_add(1);
         // If full, return false and don't store
         if(wl_index >= next_offset[0] || wl_index < my_offset[0]) {

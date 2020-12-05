@@ -28,6 +28,7 @@ const char *prog_args_usage = "";
 extern float *P_CURR, *P_NEXT;
 extern const float ALPHA, EPSILON;
 extern int MAX_ITERATIONS;
+extern int iterations;
 
 int NO_PRINT_PAGERANK = 0;
 int PRINT_TOP = 0;
@@ -67,6 +68,7 @@ void output(Host_CSR_Graph &g, const char *output_file) {
     exit(1);
   }
 
+  fprintf(stderr, "PR took %d iterations\n", iterations);
   fprintf(stderr, "Calculating sum ...\n");
   float sum = 0;
   for(int i = 0; i < g.nnodes; i++) {

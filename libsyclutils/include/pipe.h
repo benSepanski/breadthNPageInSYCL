@@ -104,10 +104,10 @@ class Pipe {
         /**
          * in-worklist (and friends) getters
          */
-        auto& get_in_worklist_buf() {
+        sycl::buffer<index_type, 1>& get_in_worklist_buf() {
             return *(this->in_worklist_buf);
         }
-        auto& get_in_worklist_size_buf() {
+        sycl::buffer<gpu_size_t, 1>& get_in_worklist_size_buf() {
             return this->in_worklist_size_buf;
         }
 

@@ -32,6 +32,8 @@ struct BFSOperatorInfo {
                    sycl::access::mode::read_write,
                    sycl::access::target::global_buffer>
                        node_data;
+    /** Called at start of push scheduling */
+    void initialize(const sycl::nd_item<1> &my_item) { }
 
     /** Constructor **/
     BFSOperatorInfo( SYCL_CSR_Graph &sycl_graph, sycl::handler &cgh, node_data_type level ) 
@@ -55,10 +57,13 @@ class BFSIter : public PushScheduler<BFSIter, BFSOperatorInfo> {
         : PushScheduler{sycl_graph, pipe, cgh, out_worklist_needs_compression, opInfo}
         { }
 
-    void applyPushOperator(sycl::nd_item<1> my_item, index_type src_node, index_type edge_index) {
+    void applyPushOperator(const sycl::nd_item<1>&,
+                           index_type src_node,
+                           index_type edge_index)
+    {
         index_type dst_node = edge_dst[edge_index];
         if(opInfo.node_data[dst_node] == INF) {
-            bool push_success = out_wl.push(my_item, dst_node);
+            bool push_success = out_wl.push(dst_node);
             if(push_success) {
                 opInfo.node_data[dst_node] = opInfo.level;
             }
@@ -107,7 +112,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                                                           sycl::range<1>{1}},
         [=](sycl::nd_item<1> my_item) {
             out_wl.initializeLocalMemory(my_item);
-            out_wl.push(my_item, START_NODE);
+            out_wl.push(START_NODE);
             out_wl.publishLocalMemory(my_item);
         });
     });
