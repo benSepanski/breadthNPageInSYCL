@@ -28,7 +28,7 @@ struct SYCL_CSR_Graph {
     SYCL_CSR_Graph( Host_CSR_Graph *graph )
         : nnodes   {graph->nnodes}
         , nedges   {graph->nedges}
-        , row_start{graph->row_start, cl::sycl::range<1>{graph->nnodes}}
+        , row_start{graph->row_start, cl::sycl::range<1>{graph->nnodes+1}}
         , edge_dst {graph->edge_dst,  cl::sycl::range<1>{graph->nedges}}
         , node_data{graph->node_data, cl::sycl::range<1>{graph->nnodes}}
         { }

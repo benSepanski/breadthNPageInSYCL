@@ -90,7 +90,7 @@ class PRIter : public PushScheduler<PRIter, PROperatorInfo> {
     {
         // Get my dest node if my edge is valid
         index_type dst_node = NNODES;
-        if(edge_index < NEDGES) {
+        if(edge_index < NEDGES && src_node < NNODES) {
             dst_node = edge_dst[edge_index];
         }
         // make sure bids_made starts out as false
@@ -100,7 +100,7 @@ class PRIter : public PushScheduler<PRIter, PROperatorInfo> {
         // their update!
         while(true) {
             // If I have stuff to do, compete for my mutex
-            if(edge_index < NEDGES) {
+            if(edge_index < NEDGES && dst_node < NNODES && src_node < NNODES) {
                 opInfo.mutex[dst_node] = my_item.get_global_id()[0];
                 opInfo.bids_made[0] = true;
             }
@@ -110,13 +110,17 @@ class PRIter : public PushScheduler<PRIter, PROperatorInfo> {
             if(!opInfo.bids_made[0]) {
                 break;
             }
+            my_item.barrier();
             opInfo.bids_made[0] = false;
             // If I have stuff to do and got my mutex, do my work!
-            if(edge_index < NEDGES && opInfo.mutex[dst_node] == my_item.get_global_id()[0]) {
+            if(edge_index < NEDGES && dst_node < NNODES && src_node < NNODES
+               && opInfo.mutex[dst_node] == my_item.get_global_id()[0]) 
+            {
                 opInfo.residuals_by_group[dst_node][my_item.get_group(0)] += opInfo.outgoing_update[src_node];
                 // I got to do my work! so I'm done
                 edge_index = NEDGES;
                 dst_node = NNODES;
+                src_node = NNODES;
             }
             // Now wait for everyone's updates to finalize
             my_item.barrier();
@@ -155,9 +159,11 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     sycl::buffer<float, 1> outgoing_update_buf(sycl::range<1>{sycl_graph.nnodes});
     sycl::buffer<size_t, 1> mutex_buf(sycl::range<1>{sycl_graph.nnodes});
 
-    // Build and initialize the worklist pipe
-    //Pipe wl_pipe{(gpu_size_t) sycl_graph.nnodes,
-    Pipe wl_pipe{(gpu_size_t) sycl_graph.nedges,
+    // Build and initialize the worklist pipe (the max
+    // is needed for small graphs so that no group runs out of space
+    // on its portion of the out-worklist)
+    Pipe wl_pipe{sycl::max((gpu_size_t) sycl_graph.nedges, (gpu_size_t) NUM_WORK_ITEMS),
+    //Pipe wl_pipe{sycl::max((gpu_size_t) sycl_graph.nnodes, (gpu_size_t) NUM_WORK_ITEMS),
                  (gpu_size_t) sycl_graph.nnodes,
                  NUM_WORK_GROUPS};
     wl_pipe.initialize(queue);
@@ -171,9 +177,9 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
         // some constants
         const gpu_size_t NNODES = (gpu_size_t) sycl_graph.nnodes;
         // pr probabilities
-        auto prob = P_CURR_buf.get_access<sycl::access::mode::discard_write>(cgh);
-        auto res = res_buf.get_access<sycl::access::mode::discard_write>(cgh);
-        auto outgoing_update = outgoing_update_buf.get_access<sycl::access::mode::discard_write>(cgh);
+        auto prob = P_CURR_buf.get_access<sycl::access::mode::write>(cgh);
+        auto res = res_buf.get_access<sycl::access::mode::write>(cgh);
+        auto outgoing_update = outgoing_update_buf.get_access<sycl::access::mode::write>(cgh);
         // out-worklist and graph
         InWorklist in_wl(wl_pipe, cgh);
         auto row_start = sycl_graph.row_start.get_access<sycl::access::mode::read>(cgh);
@@ -209,7 +215,8 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     // Used by PushScheduler to tell if you need to retry.
     // Our PR doesn't put anything on the WL, so we just need
     // a dummy variable
-    sycl::buffer<bool, 1> rerun_buf(sycl::range<1>{1});
+    bool rerun = false;
+    sycl::buffer<bool, 1> rerun_buf(&rerun, sycl::range<1>{1});
     // begin pagerank
     while(in_wl_size > 0 && ++iterations <= MAX_ITERATIONS) {
         // Run an iteration of pagerank
@@ -224,15 +231,16 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
         // Update probabilities and reset residuals and outgoing updates.
         // If anything gets update by >= epsilon, put it on the out-worklist.
         // This will always work since each group handles NNODES / NUM_WORK_GROUPS nodes,
-        // so won't run out of space
+        // so won't run out of space (as long as NNODES >= NUM_WORK_GROUPS * WORK_GROUP_SIZE)
         queue.submit([&](sycl::handler &cgh) {
             // graph and worklists
             const size_t NNODES = sycl_graph.nnodes;
+            const size_t NEDGES = sycl_graph.nedges;
             auto row_start = sycl_graph.row_start.get_access<sycl::access::mode::read>(cgh);
             OutWorklist out_wl(wl_pipe, cgh);
             // residual, updates, and probs
             auto res = res_buf.get_access<sycl::access::mode::read_write>(cgh);
-            auto outgoing_update = outgoing_update_buf.get_access<sycl::access::mode::discard_write>(cgh);
+            auto outgoing_update = outgoing_update_buf.get_access<sycl::access::mode::write>(cgh);
             auto probs = P_CURR_buf.get_access<sycl::access::mode::read_write>(cgh);
 
             cgh.parallel_for<class prob_update>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},

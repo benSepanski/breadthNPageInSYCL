@@ -72,7 +72,7 @@ struct Host_CSR_Graph {
     index_type get_out_degree(index_type node) const {
         assert( this->is_valid_node(node) );
 
-        return this->row_start[node];
+        return this->row_start[node+1] - this->row_start[node];
     }
 
     /*

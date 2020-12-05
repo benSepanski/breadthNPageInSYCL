@@ -273,7 +273,7 @@ void PushScheduler<PushOperator, OperatorInfo>::warp_scheduling(const sycl::nd_i
            my_warp_local_id = my_item.get_local_id()[0] % WARP_SIZE;
     warp_work_node[warp_id] = WORK_GROUP_SIZE;
     // Wait for memory consistency
-    my_item.barrier(sycl::access::fence_space::global_and_local);
+    my_item.barrier();
 
     //(work as warps til no one wants warp control)
     while(true) {
@@ -302,22 +302,25 @@ void PushScheduler<PushOperator, OperatorInfo>::warp_scheduling(const sycl::nd_i
             niters = (work > niters) ? work : niters;
         }
         niters = (niters + WARP_SIZE - 1) / WARP_SIZE;
+
         // copy the work node into private memory
         // and set warp_still_has_work to false for next time
         index_type work_node = warp_work_node[warp_id];
         my_item.barrier(sycl::access::fence_space::local_space);
+
         if( work_node == my_item.get_local_id()[0] ) {
             warp_work_node[warp_id] = WORK_GROUP_SIZE;
             warp_still_has_work[0] = false;
             my_work_left = 0;
         }
+
         my_item.barrier(sycl::access::fence_space::local_space);
         // Now work on the work_node's out-edges in batches of
         // size WARP_SIZE 
-        index_type first_edge = INF,
-                    last_edge = INF,
-                     src_node = INF,
-                 current_edge = INF;
+        index_type first_edge = NEDGES,
+                    last_edge = NEDGES,
+                     src_node = NNODES,
+                 current_edge = NEDGES;
         // If we have work to do as a warp, figure out what it is!
         if(work_node < WORK_GROUP_SIZE) {
             first_edge = group_first_edges[work_node],
@@ -418,7 +421,7 @@ void PushScheduler<PushOperator, OperatorInfo>::operator()(sycl::nd_item<1> my_i
     }
     // Initialize operator info
     opInfo.initialize(my_item);
-    my_item.barrier(sycl::access::fence_space::global_and_local);
+    my_item.barrier();
     // now iterate through the worklist (making sure that if anyone
     //                                   in my group has work, then
     //                                   I join in to help)
@@ -453,11 +456,9 @@ void PushScheduler<PushOperator, OperatorInfo>::operator()(sycl::nd_item<1> my_i
         warp_scheduling(my_item, my_work_left);
         fine_grained_scheduling(my_item, my_work_left, my_src_node, my_first_edge);
         // break if out-worklist is full
-        if(out_worklist_full[0]) {
-            break;
-        }
+        if(out_worklist_full[0]) { break; }
     }
-    my_item.barrier(sycl::access::fence_space::global_and_local);
+    my_item.barrier();
     if(my_local_id[0] == 0) {
         out_wl.publishLocalMemory(my_item);
         if(out_worklist_full[0]) {
