@@ -247,12 +247,12 @@ void PushScheduler<PushOperator, OperatorInfo>::group_scheduling(const sycl::nd_
         // Make sure every worker in the group enters the function call
         // or no worker in the group enters the function call
         while( current_edge - my_item.get_local_id()[0] < last_edge ) {
+            if(current_edge >= last_edge) {
+                current_edge = NEDGES;
+            }
             applyPushOperator(my_item, src_node, current_edge);
             if(current_edge < last_edge) {
                 current_edge += WORK_GROUP_SIZE;
-            }
-            else {
-                current_edge = NEDGES;
             }
         }
     }
@@ -301,6 +301,7 @@ void PushScheduler<PushOperator, OperatorInfo>::warp_scheduling(const sycl::nd_i
             }
             niters = (work > niters) ? work : niters;
         }
+        niters = (niters + WARP_SIZE - 1) / WARP_SIZE;
         // copy the work node into private memory
         // and set warp_still_has_work to false for next time
         index_type work_node = warp_work_node[warp_id];
@@ -317,6 +318,7 @@ void PushScheduler<PushOperator, OperatorInfo>::warp_scheduling(const sycl::nd_i
                     last_edge = INF,
                      src_node = INF,
                  current_edge = INF;
+        // If we have work to do as a warp, figure out what it is!
         if(work_node < WORK_GROUP_SIZE) {
             first_edge = group_first_edges[work_node],
             last_edge = group_last_edges[work_node],
@@ -324,13 +326,15 @@ void PushScheduler<PushOperator, OperatorInfo>::warp_scheduling(const sycl::nd_i
             current_edge = first_edge + my_warp_local_id;
         }
 
+        // We want every worker in the group to enters the function call
+        // or no worker in the group enters the function call
         for( size_t i = 0; i < niters; ++i) {
+            if(current_edge >= last_edge) {
+                current_edge = NEDGES;
+            }
             applyPushOperator(my_item, src_node, current_edge);
             if(current_edge < last_edge) {
                 current_edge += WARP_SIZE;
-            }
-            else {
-                current_edge = NEDGES;
             }
         }
     }
@@ -386,7 +390,7 @@ void PushScheduler<PushOperator, OperatorInfo>::fine_grained_scheduling(const sy
             index_type edge_index = fine_grained_edges[j],
                         src_node = fine_grained_src_nodes[j];
             fine_grained_edges[j] = NEDGES;
-            // If I got a valid edge, apply!
+            // apply!
             applyPushOperator(my_item, src_node, edge_index);
         }
         // Now we've done some amount of work, so I can lower my fine-grained index
