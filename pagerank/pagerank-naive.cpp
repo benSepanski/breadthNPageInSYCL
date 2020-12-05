@@ -250,6 +250,7 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                 on_out_wl[node] = false;
             }
     });});
+
     // begin pagerank
     while(in_wl_size > 0 && ++iterations <= MAX_ITERATIONS) {
         // Run an iteration of pagerank
@@ -281,8 +282,8 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
         if(!rerun_local_copy) {
             // Update probabilities and reset residuals and outgoing updates
             queue.submit([&](sycl::handler &cgh) {
-                // In-worklist and graph
-                InWorklist in_wl(wl_pipe, cgh);
+                // graph
+                const size_t NNODES = sycl_graph.nnodes;
                 auto row_start = sycl_graph.row_start.get_access<sycl::access::mode::read>(cgh);
                 // residual, updates, and probs
                 auto res = res_buf.get_access<sycl::access::mode::read_write>(cgh);
@@ -294,9 +295,7 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                 cgh.parallel_for<class prob_update>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                                       sycl::range<1>{WORK_GROUP_SIZE}},
                 [=](sycl::nd_item<1> my_item) {
-                    for(size_t index = my_item.get_global_id()[0]; index < in_wl.getSize(); index += NUM_WORK_ITEMS) {
-                        index_type node;
-                        in_wl.pop(index, node);
+                    for(size_t node = my_item.get_global_id()[0]; node < NNODES; node += NUM_WORK_ITEMS) {
                         // figure out total residual and add it to the prob
                         float total_residual = 0;
                         for(gpu_size_t wg = 0; wg < NUM_WORK_GROUPS; ++wg) {
@@ -310,27 +309,22 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                         outgoing_update[node] = total_residual * ALPHA / src_degree;
                         on_out_wl[node] = false;
                     }
-                });
-            });
+            }); });
         }
         // If re-running due to a full out-worklist, reset the residuals
         else {
             queue.submit([&](sycl::handler &cgh) {
-                InWorklist in_wl(wl_pipe, cgh);
+                const size_t NNODES = sycl_graph.nnodes;
                 auto res = res_buf.get_access<sycl::access::mode::read_write>(cgh);
 
                 cgh.parallel_for<class res_reset>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                                     sycl::range<1>{WORK_GROUP_SIZE}},
                 [=](sycl::nd_item<1> my_item) {
-                    index_type node;
-                    for(size_t index = my_item.get_global_id()[0]; index < in_wl.getSize(); index += NUM_WORK_ITEMS) {
-                        in_wl.pop(index, node);
+                    for(size_t node = my_item.get_global_id()[0]; node < NNODES; node += NUM_WORK_ITEMS) {
                         for(gpu_size_t wg = 0; wg < NUM_WORK_GROUPS; ++wg) {
                             res[node][wg] = 0.0;
-                        }
-                    }
-                });
-            });
+                    } }
+            }); });
         }
     }
 }
