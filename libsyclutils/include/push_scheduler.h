@@ -186,14 +186,13 @@ class PushScheduler {
     /**
      * Apply the push operator along an edge
      *
-     * Note: it is not guaranteed that all threads call this function
+     * Note: it not guaranteed that all threads call this function
      *       each time it is called
      *
      * my_item: my sycl work-item 
-     * src_node: the source node of the edge
-     * current_edge: the edge index
-     * degree: degree of the src node
-     * last_edge: the edge index after the last edge of the source node
+     * src_node: the source node of the edge. not defined if edge index
+     *           is invalid.
+     * current_edge: the edge index, or an invalid edge index (>= NEDGES)
      */
     void applyPushOperator(const sycl::nd_item<1> &my_item,
                            index_type src_node,
@@ -245,9 +244,16 @@ void PushScheduler<PushOperator, OperatorInfo>::group_scheduling(const sycl::nd_
                       last_edge = group_last_edges[work_node],
                        src_node = group_src_nodes[work_node],
                    current_edge = first_edge + my_item.get_local_id()[0];
-        while( current_edge < last_edge ) {
+        // Make sure every worker in the group enters the function call
+        // or no worker in the group enters the function call
+        while( current_edge - my_item.get_local_id()[0] < last_edge ) {
             applyPushOperator(my_item, src_node, current_edge);
-            current_edge += WORK_GROUP_SIZE;
+            if(current_edge < last_edge) {
+                current_edge += WORK_GROUP_SIZE;
+            }
+            else {
+                current_edge = NEDGES;
+            }
         }
     }
     my_item.barrier(sycl::access::fence_space::global_and_local);
@@ -284,7 +290,18 @@ void PushScheduler<PushOperator, OperatorInfo>::warp_scheduling(const sycl::nd_i
         if(!warp_still_has_work[0]) {
             break;
         }
-        // Otherwise, copy the work node into private memory
+        // We want every worker in the group to enters the function call
+        // or no worker in the group enters the function call, so we need
+        // to know how many times to enter the loop
+        index_type niters = 0;
+        for(gpu_size_t i = 0; i < WARPS_PER_GROUP; ++i) {
+            index_type work = 0;
+            if(warp_work_node[i] != WORK_GROUP_SIZE) {
+                work = group_last_edges[warp_work_node[i]] - group_first_edges[warp_work_node[i]];
+            }
+            niters = (work > niters) ? work : niters;
+        }
+        // copy the work node into private memory
         // and set warp_still_has_work to false for next time
         index_type work_node = warp_work_node[warp_id];
         my_item.barrier(sycl::access::fence_space::local_space);
@@ -294,22 +311,27 @@ void PushScheduler<PushOperator, OperatorInfo>::warp_scheduling(const sycl::nd_i
             my_work_left = 0;
         }
         my_item.barrier(sycl::access::fence_space::local_space);
-        // if my warp has no work to-do, just keep waiting in
-        // this while-loop (so that other warps don't deadlock
-        //                  on the barriers)
-        if(work_node >= WORK_GROUP_SIZE) {
-            continue;
-        }
-
         // Now work on the work_node's out-edges in batches of
         // size WARP_SIZE 
-        index_type   first_edge = group_first_edges[work_node],
-                      last_edge = group_last_edges[work_node],
-                       src_node = group_src_nodes[work_node],
-                   current_edge = first_edge + my_warp_local_id;
-        while( current_edge < last_edge ) {
+        index_type first_edge = INF,
+                    last_edge = INF,
+                     src_node = INF,
+                 current_edge = INF;
+        if(work_node < WORK_GROUP_SIZE) {
+            first_edge = group_first_edges[work_node],
+            last_edge = group_last_edges[work_node],
+            src_node = group_src_nodes[work_node],
+            current_edge = first_edge + my_warp_local_id;
+        }
+
+        for( size_t i = 0; i < niters; ++i) {
             applyPushOperator(my_item, src_node, current_edge);
-            current_edge += WARP_SIZE;
+            if(current_edge < last_edge) {
+                current_edge += WARP_SIZE;
+            }
+            else {
+                current_edge = NEDGES;
+            }
         }
     }
     my_item.barrier(sycl::access::fence_space::global_and_local);
@@ -364,10 +386,6 @@ void PushScheduler<PushOperator, OperatorInfo>::fine_grained_scheduling(const sy
             index_type edge_index = fine_grained_edges[j],
                         src_node = fine_grained_src_nodes[j];
             fine_grained_edges[j] = NEDGES;
-            // If I got an invalid edge, skip
-            if(edge_index >= NEDGES) {
-                continue;
-            }
             // If I got a valid edge, apply!
             applyPushOperator(my_item, src_node, edge_index);
         }

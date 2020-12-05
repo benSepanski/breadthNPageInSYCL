@@ -61,6 +61,9 @@ class BFSIter : public PushScheduler<BFSIter, BFSOperatorInfo> {
                            index_type src_node,
                            index_type edge_index)
     {
+        // invalid edge case
+        if(edge_index >= NEDGES) return;
+        // valid edge case
         index_type dst_node = edge_dst[edge_index];
         if(opInfo.node_data[dst_node] == INF) {
             bool push_success = out_wl.push(dst_node);
