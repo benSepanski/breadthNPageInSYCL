@@ -186,7 +186,7 @@ class PushScheduler {
     /**
      * Apply the push operator along an edge
      *
-     * Note: it not guaranteed that all threads call this function
+     * Note: it guaranteed that all threads in a group call this function
      *       each time it is called
      *
      * my_item: my sycl work-item 
