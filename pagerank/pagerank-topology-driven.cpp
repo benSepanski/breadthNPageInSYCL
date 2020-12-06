@@ -134,7 +134,7 @@ float *P_CURR;
 void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue);
 
 int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
-    std::cout << "NUM WORK GROUPS: " << num_work_groups << "\n";
+    std::cerr << "NUM WORK GROUPS: " << num_work_groups << "\n";
     try {
         sycl_pagerank(sycl_graph, queue);
     }
@@ -278,4 +278,5 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
             converged_host_copy = converged_acc[0];
         }
     }
+    queue.wait_and_throw();
 }

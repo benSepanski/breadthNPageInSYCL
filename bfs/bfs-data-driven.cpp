@@ -119,6 +119,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     });
 
     // Run BFS
+    size_t num_kernel_reruns = 0;
     size_t level = 1;
     bool rerun_level = false;
     sycl::buffer<bool, 1> rerun_level_buf(&rerun_level, sycl::range<1>{1});
@@ -141,16 +142,20 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
                 auto in_wl_size_acc = wl_pipe.get_in_worklist_size_buf().get_access<sycl::access::mode::read>();
                 in_wl_size = in_wl_size_acc[0];
             }
+            else {
+                num_kernel_reruns++;
+            }
             rerun_level_acc[0] = false;
         }
     }
     // Wait for BFS to finish and throw asynchronous errors if any
     queue.wait_and_throw();
+    std::cerr << "NUM KERNEL RERUNS: " << num_kernel_reruns << "\n";
 }
 
 
 int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
-    std::cout << "NUM WORK GROUPS: " << num_work_groups << "\n";
+    std::cerr << "NUM WORK GROUPS: " << num_work_groups << "\n";
     // Run sycl bfs in a try-catch block.
     try {
         sycl_bfs(sycl_graph, queue);

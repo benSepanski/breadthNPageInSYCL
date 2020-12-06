@@ -90,7 +90,7 @@ class PRIter : public PushScheduler<PRIter, PROperatorInfo> {
         : PushScheduler{num_work_groups, sycl_graph, pipe, cgh, out_worklist_needs_compression, opInfo}
         { }
 
-    // Do a page-rank update, but don't use the out-waitlist!
+    // Do a page-rank update
     void applyPushOperator(const sycl::nd_item<1> &my_item,
                            index_type src_node,
                            index_type edge_index) 
@@ -158,7 +158,7 @@ float *P_CURR;
 void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue);
 
 int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
-    std::cout << "NUM WORK GROUPS: " << num_work_groups << "\n";
+    std::cerr << "NUM WORK GROUPS: " << num_work_groups << "\n";
     try {
         sycl_pagerank(sycl_graph, queue);
     }
@@ -250,6 +250,7 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     }); });
 
 
+    size_t num_kernel_reruns = 0;
     // local copy of in-worklist size
     gpu_size_t in_wl_size = sycl_graph.nnodes;
     // Used by PushScheduler to tell if you need to retry.
@@ -269,6 +270,7 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
         {
             auto rerun_acc = rerun_buf.get_access<sycl::access::mode::read>();
             rerun_host_copy = rerun_acc[0];
+            num_kernel_reruns += rerun_host_copy;
         }
         // If not re-running,
         // Update probabilities and reset residuals and outgoing updates.
@@ -339,4 +341,6 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
             wl_pipe.compress(queue);
         }
     }
+    queue.wait_and_throw();
+    std::cerr << "NUM KERNEL RERUNS: " << num_kernel_reruns << "\n";
 }

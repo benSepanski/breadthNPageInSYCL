@@ -153,7 +153,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
 
 
 int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
-    std::cout << "NUM WORK GROUPS: " << num_work_groups << "\n";
+    std::cerr << "NUM WORK GROUPS: " << num_work_groups << "\n";
     // Run sycl bfs in a try-catch block.
     try {
         sycl_bfs(sycl_graph, queue);
