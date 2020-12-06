@@ -153,7 +153,8 @@ int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
 
 void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     // build buffers for probability and probability residuals
-    P_CURR = new float[sycl_graph.nnodes];
+    P_CURR = (float*) calloc(sycl_graph.nnodes, sizeof(float));
+    assert(P_CURR != NULL);
     sycl::buffer<float, 1> P_CURR_buf(P_CURR, sycl::range<1>{sycl_graph.nnodes});
     sycl::buffer<float, 2> res_buf(sycl::range<2>{sycl_graph.nnodes, NUM_WORK_GROUPS});
     sycl::buffer<float, 1> outgoing_update_buf(sycl::range<1>{sycl_graph.nnodes});
@@ -162,8 +163,7 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     // Build and initialize the worklist pipe (the max
     // is needed for small graphs so that no group runs out of space
     // on its portion of the out-worklist)
-    Pipe wl_pipe{sycl::max((gpu_size_t) sycl_graph.nedges, (gpu_size_t) NUM_WORK_ITEMS),
-    //Pipe wl_pipe{sycl::max((gpu_size_t) sycl_graph.nnodes, (gpu_size_t) NUM_WORK_ITEMS),
+    Pipe wl_pipe{sycl::max(sycl::max((gpu_size_t) sycl_graph.nedges, (gpu_size_t) NUM_WORK_ITEMS), (gpu_size_t) sycl_graph.nnodes),
                  (gpu_size_t) sycl_graph.nnodes,
                  NUM_WORK_GROUPS};
     wl_pipe.initialize(queue);

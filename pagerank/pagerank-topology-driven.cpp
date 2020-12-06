@@ -1,4 +1,3 @@
-#include <fstream>
 #include <climits>
 #include <iostream>
 #include <CL/sycl.hpp>
