@@ -1,4 +1,9 @@
-add_executable(pagerank-naive pagerank-naive.cpp
+add_executable(pagerank-data-driven pagerank-data-driven.cpp
                               support.cpp)
-add_sycl_to_target(TARGET pagerank-naive SOURCES pagerank-naive.cpp )
-target_link_libraries(pagerank-naive breadthNPageInSYCL::syclUtils)
+add_sycl_to_target(TARGET pagerank-data-driven SOURCES pagerank-data-driven.cpp )
+target_link_libraries(pagerank-data-driven breadthNPageInSYCL::syclUtils)
+
+add_executable(pagerank-topology-driven pagerank-topology-driven.cpp
+                              support.cpp)
+add_sycl_to_target(TARGET pagerank-topology-driven SOURCES pagerank-topology-driven.cpp )
+target_link_libraries(pagerank-topology-driven breadthNPageInSYCL::syclUtils)
