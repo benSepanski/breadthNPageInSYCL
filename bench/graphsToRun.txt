@@ -3,6 +3,3 @@
 /net/ohm/export/iss/dist-inputs/road-USA-W.gr
 /net/ohm/export/iss/dist-inputs/rmat20.gr
 /net/ohm/export/iss/dist-inputs/road-USA.gr
-/net/ohm/export/iss/dist-inputs/rmat22.gr
-/net/ohm/export/iss/dist-inputs/livejournal.gr
-/net/ohm/export/iss/dist-inputs/rmat23.gr

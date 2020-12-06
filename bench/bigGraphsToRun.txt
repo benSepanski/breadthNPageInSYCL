@@ -1,0 +1,3 @@
+/net/ohm/export/iss/dist-inputs/rmat22.gr
+/net/ohm/export/iss/dist-inputs/livejournal.gr
+/net/ohm/export/iss/dist-inputs/rmat23.gr
