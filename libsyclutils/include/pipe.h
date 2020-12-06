@@ -189,29 +189,75 @@ class Pipe {
             sycl::accessor<gpu_size_t, 1,
                            sycl::access::mode::read_write,
                            sycl::access::target::local>
-                               // where to start writing my part of the worklist
-                               compressed_start{sycl::range<1>{1}, cgh},
-                               // offset of this group's part of the worklist
-                               offset{sycl::range<1>{1}, cgh},
-                               // size of this group's part of the worklist
-                               size{sycl::range<1>{1}, cgh};
+                               // out-worklist offsets in local memory
+                               offsets{sycl::range<1>{NUM_WORK_GROUPS}, cgh},
+                               // out-worklist sizes in local memory
+                               sizes{sycl::range<1>{NUM_WORK_GROUPS}, cgh};
 
             const gpu_size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
                              NUM_WORK_ITEMS  = WORK_GROUP_SIZE * NUM_WORK_GROUPS;
             cgh.parallel_for<class CompressOutWorklist>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                                           sycl::range<1>{WORK_GROUP_SIZE}},
             [=](sycl::nd_item<1> my_item) {
-                gpu_size_t start = out_worklist_offsets[0] + out_worklist_sizes[0];
-                for(size_t wg = 1; wg < NUM_WORK_GROUPS; ++wg) {
-                    gpu_size_t wg_size = out_worklist_sizes[wg],
-                               wg_offset = out_worklist_offsets[wg];
-                    for(gpu_size_t index = my_item.get_global_id()[0]; index < wg_size; index += NUM_WORK_ITEMS) {
-                        out_worklist[start + index] = out_worklist[wg_offset + index];
+                // wait for thread 0
+                // to load offsets/sizes into local memory
+                if(my_item.get_local_id()[0] == 0) {
+                    for(gpu_size_t wg = 0; wg < NUM_WORK_GROUPS; ++wg) {
+                        sizes[wg] = out_worklist_sizes[wg];
+                        offsets[wg] = out_worklist_offsets[wg];
                     }
-                    start += wg_size;
                 }
-            });
-        });
+                my_item.barrier();
+                // find the *global_id*th entry from the end
+                gpu_size_t cur_group = NUM_WORK_GROUPS - 1;
+                gpu_size_t index = offsets[cur_group] + sizes[cur_group];
+                gpu_size_t back_count = my_item.get_global_id()[0] + 1;
+                while(back_count > 0 && index > 0 && cur_group > 0) {
+                    if(sizes[cur_group] < back_count) {
+                        back_count -= sizes[cur_group];
+                        cur_group--;
+                        index = offsets[cur_group] + sizes[cur_group];
+                    }
+                    else {
+                        index -= back_count;
+                        back_count = 0;
+                    }
+                }
+                // Fill in the *global_id*th gap from the start.
+                // Then repeat with a step size of NUM_WORK_GROUPS
+                gpu_size_t dest_group = 0;
+                gpu_size_t dest_index = offsets[dest_group] + sizes[dest_group];
+                gpu_size_t count = my_item.get_global_id()[0];
+                while(dest_index < index && dest_group < cur_group) {
+                    gpu_size_t gap = offsets[dest_group+1] - dest_index;
+                    if(count >= gap) {
+                        count -= gap;
+                        dest_group++;
+                        if(dest_group >= NUM_WORK_GROUPS) {
+                            break;
+                        }
+                        dest_index = offsets[dest_group] + sizes[dest_group];
+                    }
+                    else {
+                        dest_index += count;
+                        count = NUM_WORK_ITEMS;
+                        out_worklist[dest_index] = out_worklist[index];
+                        gpu_size_t back_count = NUM_WORK_ITEMS;
+                        while(back_count > 0 && index > 0 && cur_group > 0) {
+                            gpu_size_t gap = index - offsets[cur_group];
+                            if(gap < back_count) {
+                                back_count -= gap;
+                                cur_group--;
+                                index = offsets[cur_group] + sizes[cur_group];
+                            }
+                            else {
+                                index -= back_count;
+                                back_count = 0;
+                            }
+                        }
+                    }
+                }
+        }); });
         /// Next, submit a job to reset the out-worklist sizes and offsets
         queue.submit([&] (sycl::handler &cgh) {
             // copy constants
