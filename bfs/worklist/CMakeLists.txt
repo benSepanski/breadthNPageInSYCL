@@ -1,3 +1,3 @@
-add_executable(bfs-worklist bfs-worklist.cpp ../support.cpp )
-add_sycl_to_target(TARGET bfs-worklist SOURCES bfs-worklist.cpp)
-target_link_libraries(bfs-worklist breadthNPageInSYCL::syclUtils)
+add_executable(bfs-data-driven bfs-data-driven.cpp ../support.cpp )
+add_sycl_to_target(TARGET bfs-data-driven SOURCES bfs-data-driven.cpp)
+target_link_libraries(bfs-data-driven breadthNPageInSYCL::syclUtils)
