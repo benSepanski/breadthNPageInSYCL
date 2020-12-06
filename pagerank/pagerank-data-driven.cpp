@@ -26,10 +26,7 @@ class prob_update;
 class InitOnOutWL;
 class HardReset;
 
-const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
-             NUM_WORK_GROUPS = NUM_THREAD_BLOCKS,
-             NUM_WORK_ITEMS  = NUM_WORK_GROUPS * WORK_GROUP_SIZE,
-             WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
+extern size_t num_work_groups;
 
 struct PROperatorInfo {
     // global accessors
@@ -86,10 +83,11 @@ struct PROperatorInfo {
 // Define our PR push operator
 class PRIter : public PushScheduler<PRIter, PROperatorInfo> {
     public:
-    PRIter(SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
+    PRIter(gpu_size_t num_work_groups,
+           SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
            sycl::buffer<bool, 1> &out_worklist_needs_compression,
            PROperatorInfo &opInfo)
-        : PushScheduler{sycl_graph, pipe, cgh, out_worklist_needs_compression, opInfo}
+        : PushScheduler{num_work_groups, sycl_graph, pipe, cgh, out_worklist_needs_compression, opInfo}
         { }
 
     // Do a page-rank update, but don't use the out-waitlist!
@@ -160,6 +158,7 @@ float *P_CURR;
 void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue);
 
 int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
+    std::cout << "NUM WORK GROUPS: " << num_work_groups << "\n";
     try {
         sycl_pagerank(sycl_graph, queue);
     }
@@ -176,6 +175,10 @@ int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
 
 
 void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
+    const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
+                 NUM_WORK_GROUPS = num_work_groups,
+                 NUM_WORK_ITEMS  = NUM_WORK_GROUPS * WORK_GROUP_SIZE,
+                 WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
     // build buffers for probability and probability residuals
     P_CURR = (float*) calloc(sycl_graph.nnodes, sizeof(float));
     assert(P_CURR != NULL);
@@ -189,7 +192,7 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     // on its portion of the out-worklist)
     Pipe wl_pipe{sycl::max(sycl::max((gpu_size_t) sycl_graph.nedges, (gpu_size_t) NUM_WORK_ITEMS), (gpu_size_t) sycl_graph.nnodes),
                  (gpu_size_t) sycl_graph.nnodes,
-                 NUM_WORK_GROUPS};
+                 (gpu_size_t) NUM_WORK_GROUPS};
     wl_pipe.initialize(queue);
 
     // Initialize probabilities to 1-ALPHA,
@@ -257,7 +260,7 @@ void sycl_pagerank(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
         // Run an iteration of pagerank
         queue.submit([&](sycl::handler &cgh) {
             PROperatorInfo prInfo( res_buf, outgoing_update_buf, on_out_wl_buf, mutex_buf, cgh );
-            PRIter currentIter( sycl_graph, wl_pipe, cgh, rerun_buf, prInfo );
+            PRIter currentIter(NUM_WORK_GROUPS, sycl_graph, wl_pipe, cgh, rerun_buf, prInfo );
             cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                sycl::range<1>{WORK_GROUP_SIZE}},
                              currentIter);

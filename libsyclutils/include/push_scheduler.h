@@ -34,7 +34,7 @@ class PushScheduler {
                      NUM_WORK_GROUPS,
                      // TODO: MAke these variable
                      WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
-                     NUM_WORK_ITEMS = NUM_WORK_GROUPS * WORK_GROUP_SIZE,
+                     NUM_WORK_ITEMS = WORK_GROUP_SIZE * NUM_WORK_GROUPS,
                      WARPS_PER_GROUP = (WORK_GROUP_SIZE + WARP_SIZE - 1) / WARP_SIZE,
                      // TODO: make these variable, and make sure
                      //       fine-grained edge capacity is dependent on
@@ -151,11 +151,11 @@ class PushScheduler {
                                  index_type my_first_edge);
 
     public:
-        PushScheduler(gpu_size_t NUM_WORK_GROUPS,
+        PushScheduler(gpu_size_t num_work_groups,
                       SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
                       sycl::buffer<bool, 1> &out_worklist_needs_compression_buf,
                       OperatorInfo &operatorInfo) 
-            : NUM_WORK_GROUPS{ NUM_WORK_GROUPS}
+            : NUM_WORK_GROUPS{ num_work_groups }
             // This cast is okay because sycl_driver does a check
             // TODO: we should probably also do a check here though for safety?
             , NNODES{ (gpu_size_t) sycl_graph.nnodes }

@@ -2,7 +2,7 @@
 
 // From libsyclutils
 //
-// THREAD_BLOCK_SIZE WARP_SIZE NUM_THREAD_BLOCKS
+// THREAD_BLOCK_SIZE WARP_SIZE
 #include "kernel_sizing.h"
 // SYCL_CSR_Graph node_data_type index_type
 #include "sycl_csr_graph.h"
@@ -21,10 +21,7 @@ class wl_init;
 // from support.cpp
 extern index_type start_node;
 
-const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
-             NUM_WORK_GROUPS = NUM_THREAD_BLOCKS,
-             NUM_WORK_ITEMS  = NUM_WORK_GROUPS * WORK_GROUP_SIZE,
-             WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
+extern size_t num_work_groups;
 
 struct BFSOperatorInfo {
     sycl::accessor<node_data_type, 1,
@@ -56,10 +53,11 @@ struct BFSOperatorInfo {
 // Define our BFS push operator
 class BFSIter : public PushScheduler<BFSIter, BFSOperatorInfo> {
     public:
-    BFSIter(SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
+    BFSIter(gpu_size_t num_work_groups,
+            SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
             sycl::buffer<bool, 1> &out_worklist_needs_compression,
             BFSOperatorInfo &opInfo)
-        : PushScheduler{sycl_graph, pipe, cgh, out_worklist_needs_compression, opInfo}
+        : PushScheduler{num_work_groups, sycl_graph, pipe, cgh, out_worklist_needs_compression, opInfo}
         { }
 
     void applyPushOperator(const sycl::nd_item<1>&,
@@ -84,10 +82,14 @@ class BFSIter : public PushScheduler<BFSIter, BFSOperatorInfo> {
  * into the node_data
  */
 void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
+    const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
+                 NUM_WORK_GROUPS = num_work_groups,
+                 NUM_WORK_ITEMS  = NUM_WORK_GROUPS * WORK_GROUP_SIZE,
+                 WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
     // set up worklists
     Pipe wl_pipe{(gpu_size_t) sycl_graph.nnodes,
                  (gpu_size_t) sycl_graph.nnodes,
-                 NUM_WORK_GROUPS};
+                 (gpu_size_t) NUM_WORK_GROUPS};
 
     // initialize node levels
     queue.submit([&] (sycl::handler &cgh) {
@@ -131,7 +133,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
         // Relax all edges
         queue.submit([&]( sycl::handler &cgh) {
             BFSOperatorInfo bfsInfo{ sycl_graph, done_buf, cgh };
-            BFSIter current_iter(sycl_graph, wl_pipe, cgh, rerun_buf, bfsInfo);
+            BFSIter current_iter(NUM_WORK_GROUPS, sycl_graph, wl_pipe, cgh, rerun_buf, bfsInfo);
             cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                sycl::range<1>{WORK_GROUP_SIZE}},
                              current_iter);
@@ -151,6 +153,7 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
 
 
 int sycl_main(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
+    std::cout << "NUM WORK GROUPS: " << num_work_groups << "\n";
     // Run sycl bfs in a try-catch block.
     try {
         sycl_bfs(sycl_graph, queue);

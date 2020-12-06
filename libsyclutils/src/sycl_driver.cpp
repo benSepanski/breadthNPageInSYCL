@@ -36,6 +36,7 @@ int QUIET = 0;
 char *INPUT, *OUTPUT;
 
 int CUDA_DEVICE = -1;
+size_t num_work_groups = 4;
 
 //mgpu::ContextPtr mgc;
 
@@ -139,15 +140,15 @@ int load_graph_and_run_kernel(char *graph_file, cl::sycl::device_selector &dev_s
 void usage(int argc, char *argv[]) 
 {
   if(strlen(prog_usage)) 
-    fprintf(stderr, "usage: %s [-q quiet] [-g gpunum] [-o output-file] %s graph-file \n %s\n", argv[0], prog_usage, prog_args_usage);
+    fprintf(stderr, "usage: %s [-q quiet] [-g gpunum] [-b numblocks] [-o output-file] %s graph-file \n %s\n", argv[0], prog_usage, prog_args_usage);
   else
-    fprintf(stderr, "usage: %s [-q quiet] [-g gpunum] [-o output-file] graph-file %s\n", argv[0], prog_args_usage);
+    fprintf(stderr, "usage: %s [-q quiet] [-g gpunum] [-b numblocks] [-o output-file] graph-file %s\n", argv[0], prog_args_usage);
 }
 
 void parse_args(int argc, char *argv[]) 
 {
   int c;
-  const char *skel_opts = "g:qo:";
+  const char *skel_opts = "g:qo:b:";
   char *opts;
   int len = 0;
   
@@ -170,6 +171,15 @@ void parse_args(int argc, char *argv[])
         CUDA_DEVICE = strtol(optarg, &end, 10);
         if(errno != 0 || *end != '\0') {
           fprintf(stderr, "Invalid GPU device '%s'. An integer must be specified.\n", optarg);
+          exit(EXIT_FAILURE);
+        }
+        break;
+      case 'b':
+        char *wg_end;
+        errno = 0;
+        num_work_groups = strtol(optarg, &wg_end, 10);
+        if(errno != 0 || *wg_end != '\0') {
+          fprintf(stderr, "Invalid number of work-groups '%s'. An integer must be specified.\n", optarg);
           exit(EXIT_FAILURE);
         }
         break;

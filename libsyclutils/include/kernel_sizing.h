@@ -3,6 +3,5 @@
 
 #define THREAD_BLOCK_SIZE 256
 #define WARP_SIZE 32
-#define NUM_THREAD_BLOCKS 6
 
 #endif
