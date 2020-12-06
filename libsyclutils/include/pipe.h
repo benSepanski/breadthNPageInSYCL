@@ -201,29 +201,14 @@ class Pipe {
             cgh.parallel_for<class CompressOutWorklist>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                                           sycl::range<1>{WORK_GROUP_SIZE}},
             [=](sycl::nd_item<1> my_item) {
-                // figure out where the stuff in my portion of the worklist needs to go,
-                // and figure out my new offset and start
-                gpu_size_t start;
-                if(my_item.get_local_id()[0] == 0) {
-                    start = out_worklist_offsets[0];
-                    for(size_t wg = 0; wg < my_item.get_group(0); ++wg) {
-                        start += out_worklist_sizes[wg];
+                gpu_size_t start = out_worklist_offsets[0] + out_worklist_sizes[0];
+                for(size_t wg = 1; wg < NUM_WORK_GROUPS; ++wg) {
+                    gpu_size_t wg_size = out_worklist_sizes[wg],
+                               wg_offset = out_worklist_offsets[wg];
+                    for(gpu_size_t index = my_item.get_global_id()[0]; index < wg_size; index += NUM_WORK_ITEMS) {
+                        out_worklist[start + index] = out_worklist[wg_offset + index];
                     }
-                    compressed_start[0] = start;
-                    // load in offset and size from global memory
-                    offset[0] = out_worklist_offsets[my_item.get_group(0)];
-                    size[0] = out_worklist_sizes[my_item.get_group(0)];
-                }
-                // wait for thread 0 in my block to figure out our starting place
-                my_item.barrier(sycl::access::fence_space::local_space);
-                // Now work as a group to move our portion of the worklist into the contiguous
-                // portion of the worklist
-                start = compressed_start[0];
-                gpu_size_t my_group_size = size[0],
-                           my_group_offset = offset[0];
-                for(gpu_size_t index = my_item.get_local_id()[0]; index < my_group_size; index += WORK_GROUP_SIZE) 
-                {
-                    out_worklist[start + index] = out_worklist[my_group_offset + index];
+                    start += wg_size;
                 }
             });
         });
