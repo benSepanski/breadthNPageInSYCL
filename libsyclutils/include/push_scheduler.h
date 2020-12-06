@@ -1,6 +1,6 @@
 #include <CL/sycl.hpp>
 //
-// THREAD_BLOCK_SIZE WARP_SIZE NUM_THREAD_BLOCKS
+// THREAD_BLOCK_SIZE WARP_SIZE
 #include "kernel_sizing.h"
 // SYCL_CSR_Graph index_type
 #include "sycl_csr_graph.h"
@@ -31,9 +31,9 @@ class PushScheduler {
     protected:
     const gpu_size_t NNODES,
                      NEDGES,
+                     NUM_WORK_GROUPS,
                      // TODO: MAke these variable
                      WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
-                     NUM_WORK_GROUPS = NUM_THREAD_BLOCKS,
                      NUM_WORK_ITEMS = NUM_WORK_GROUPS * WORK_GROUP_SIZE,
                      WARPS_PER_GROUP = (WORK_GROUP_SIZE + WARP_SIZE - 1) / WARP_SIZE,
                      // TODO: make these variable, and make sure
@@ -151,12 +151,14 @@ class PushScheduler {
                                  index_type my_first_edge);
 
     public:
-        PushScheduler(SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
+        PushScheduler(gpu_size_t NUM_WORK_GROUPS,
+                      SYCL_CSR_Graph &sycl_graph, Pipe &pipe, sycl::handler &cgh,
                       sycl::buffer<bool, 1> &out_worklist_needs_compression_buf,
                       OperatorInfo &operatorInfo) 
+            : NUM_WORK_GROUPS{ NUM_WORK_GROUPS}
             // This cast is okay because sycl_driver does a check
             // TODO: we should probably also do a check here though for safety?
-            : NNODES{ (gpu_size_t) sycl_graph.nnodes }
+            , NNODES{ (gpu_size_t) sycl_graph.nnodes }
             , NEDGES{ (gpu_size_t) sycl_graph.nedges }
             // in/out worklists
             , in_wl{ pipe, cgh }
