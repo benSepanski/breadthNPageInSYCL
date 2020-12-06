@@ -85,7 +85,7 @@ class BFSIter : public PushScheduler<BFSIter, BFSOperatorInfo> {
  */
 void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
     // set up worklists
-    Pipe wl_pipe{(gpu_size_t) sycl_graph.nedges,
+    Pipe wl_pipe{(gpu_size_t) sycl_graph.nnodes,
                  (gpu_size_t) sycl_graph.nnodes,
                  NUM_WORK_GROUPS};
 
