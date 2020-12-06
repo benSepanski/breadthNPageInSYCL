@@ -27,23 +27,28 @@ const size_t WORK_GROUP_SIZE = THREAD_BLOCK_SIZE,
              WARPS_PER_GROUP = WORK_GROUP_SIZE / WARP_SIZE;
 
 struct BFSOperatorInfo {
-    node_data_type level;
     sycl::accessor<node_data_type, 1,
                    sycl::access::mode::read_write,
                    sycl::access::target::global_buffer>
                        node_data;
+    sycl::accessor<bool, 1,
+                   sycl::access::mode::write,
+                   sycl::access::target::global_buffer>
+                       done;
     /** Called at start of push scheduling */
     void initialize(const sycl::nd_item<1> &my_item) { }
 
     /** Constructor **/
-    BFSOperatorInfo( SYCL_CSR_Graph &sycl_graph, sycl::handler &cgh, node_data_type level ) 
+    BFSOperatorInfo( SYCL_CSR_Graph &sycl_graph,
+                     sycl::buffer<bool, 1> &done_buf,
+                     sycl::handler &cgh )
         : node_data{ sycl_graph.node_data, cgh }
-        , level{ level }
+        , done{ done_buf, cgh }
     { }
     /** We must provide a copy constructor */
     BFSOperatorInfo( const BFSOperatorInfo &that )
         : node_data{ that.node_data }
-        , level{ that.level }
+        , done{ that.done }
     { }
 };
 
@@ -65,14 +70,10 @@ class BFSIter : public PushScheduler<BFSIter, BFSOperatorInfo> {
         if(edge_index >= NEDGES) return;
         // valid edge case
         index_type dst_node = edge_dst[edge_index];
-        if(opInfo.node_data[dst_node] == INF) {
-            bool push_success = out_wl.push(dst_node);
-            if(push_success) {
-                opInfo.node_data[dst_node] = opInfo.level;
-            }
-            else {
-                out_worklist_full[0] = true;
-            }
+        if(   opInfo.node_data[src_node] != INF 
+           && opInfo.node_data[src_node] + 1 < opInfo.node_data[dst_node]) {
+            opInfo.node_data[dst_node] = opInfo.node_data[src_node] + 1;
+            opInfo.done[0] = false;
         }
     }
 };
@@ -105,41 +106,43 @@ void sycl_bfs(SYCL_CSR_Graph &sycl_graph, sycl::queue &queue) {
             }
         });
     });
-    // Initialize in-worklist
+    // Initialize in-worklist to all nodes
     wl_pipe.initialize(queue);
     queue.submit([&] (sycl::handler &cgh) {
         InWorklist in_wl(wl_pipe, cgh);
-        const index_type START_NODE = start_node;
-        cgh.single_task<class wl_init>( [=]() {
-            in_wl.setSize(1);
-            in_wl.push(0, START_NODE);
-        });
-    });
+        const size_t NNODES = sycl_graph.nnodes;
+        cgh.parallel_for<class wl_init>(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
+                                                          sycl::range<1>{WORK_GROUP_SIZE}},
+        [=](sycl::nd_item<1> my_item) {
+            in_wl.setSize(NNODES);
+            for(index_type i = my_item.get_global_id()[0]; i < NNODES; i += NUM_WORK_ITEMS) {
+                // put *i* in *i*th position
+                in_wl.push(i, i);
+            }
+    }); });
 
     // Run BFS
-    size_t level = 1;
-    bool rerun_level = false;
-    sycl::buffer<bool, 1> rerun_level_buf(&rerun_level, sycl::range<1>{1});
-    gpu_size_t in_wl_size = 1;
-    while(in_wl_size > 0) {
+    bool done = true;
+    sycl::buffer<bool, 1> done_buf(&done, sycl::range<1>{1});
+    // We won't need to rerun since we're doing topology-driven
+    bool rerun = false;
+    sycl::buffer<bool, 1> rerun_buf(&rerun, sycl::range<1>{1});
+    while(true) {
+        // Relax all edges
         queue.submit([&]( sycl::handler &cgh) {
-            BFSOperatorInfo bfsInfo{ sycl_graph, cgh, level };
-            BFSIter current_iter(sycl_graph, wl_pipe, cgh, rerun_level_buf, bfsInfo);
+            BFSOperatorInfo bfsInfo{ sycl_graph, done_buf, cgh };
+            BFSIter current_iter(sycl_graph, wl_pipe, cgh, rerun_buf, bfsInfo);
             cgh.parallel_for(sycl::nd_range<1>{sycl::range<1>{NUM_WORK_ITEMS},
                                                sycl::range<1>{WORK_GROUP_SIZE}},
                              current_iter);
         });
-
-        wl_pipe.compress(queue);
+        // are we done?
         {
-            auto rerun_level_acc = rerun_level_buf.get_access<sycl::access::mode::read_write>();
-            if(!rerun_level_acc[0]) {
-                level++;
-                wl_pipe.swapSlots(queue);
-                auto in_wl_size_acc = wl_pipe.get_in_worklist_size_buf().get_access<sycl::access::mode::read>();
-                in_wl_size = in_wl_size_acc[0];
+            auto done_acc = done_buf.get_access<sycl::access::mode::read_write>();
+            if(done_acc[0]) {
+                break;
             }
-            rerun_level_acc[0] = false;
+            done_acc[0] = true;
         }
     }
     // Wait for BFS to finish and throw asynchronous errors if any
