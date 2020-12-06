@@ -19,10 +19,10 @@ Our aim is for these benchmarks to be easily reproducible.
 ## Directory structure
 
 * `bfs` contains the SYCL implementation of BFS
-* `bench` contains instructions for benchmarking the
-  implementations
+* `pagerank` contains the SYCL implementation of BFS
 * `annotatedLonestar` provides annotations on the Lonestar GPU
-  implemenations of BFS and PR for quick reference
+  implementations of BFS and a copy of the Lonestar GPU implementation
+  of pagerank for quick reference.
 * `libsyclutils` provides a skeleton for the bfs and pagerank
   SYCL applications, as well as some objects needed in both
   (such as a graph which plays with SYCL,
