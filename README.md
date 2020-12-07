@@ -27,6 +27,10 @@ Our aim is for these benchmarks to be easily reproducible.
   SYCL applications, as well as some objects needed in both
   (such as a graph which plays with SYCL,
   and a worklist)
+* `bench` holds the scripts used to run trials.
+* `projectResults` holds the outputs of the results in a `.tar.gz`,
+   as well as the results cleaned into a `.csv`, and an R script used
+   for cleaning.
 
 ## SYCL Resources
 
