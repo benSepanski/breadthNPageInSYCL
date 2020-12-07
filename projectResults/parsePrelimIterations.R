@@ -23,7 +23,23 @@ results <- tibble::tibble(device = str_extract_all(result_text, "(?<=Device )\\d
                          graph = result_text %>%
                                   str_extract("(?<=INPUTGRAPH ).*(?=\\.gr(\n|\r))") %>%
                                   map(~rep(.x, 9)) %>%
-                                  unlist()
+                                  unlist(),
+                         nnodes = result_text %>%
+                                 str_extract("(?<=nnodes=)\\d+") %>%
+                                 map(~rep(.x, 9)) %>%
+                                 unlist() %>%
+                                 as.numeric(),
+                         nedges = result_text %>%
+                                 str_extract("(?<=nedges=)\\d+") %>%
+                                 map(~rep(.x, 9)) %>%
+                                 unlist() %>%
+                                 as.numeric(),
+                         problem = result_text %>%
+                           str_extract("PR") %>%
+                           map(~rep(.x, 9)) %>%
+                           unlist() %>% 
+                           map(~if(is.na(.x)) {return("BFS")} else {return("PR")}) %>%
+                           unlist()
                           ) %>%
            dplyr::mutate(graph = str_extract(graph, "[^/]*$"))
 
