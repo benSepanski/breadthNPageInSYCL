@@ -17,12 +17,14 @@ num_iters_per_file <- 3 + 3 * 2 * 5
 results <- tibble::tibble(device = str_extract_all(result_text, "(?<=Device )\\d"),
                           time_in_ms = str_extract_all(result_text, "(?<=Total time: )(\\d+|[nN][aA])(?= ms)"),
                           time_in_ns = str_extract_all(result_text, "(?<=Total time: )(\\d+|[nN][aA])(?= ns)"),
-                          method = str_extract_all(result_text, "(SYCL Data-Driven|SYCL Topology-Driven|Lonestar)")
-) %>%
+                          method = str_extract_all(result_text, "(SYCL Data-Driven|SYCL Topology-Driven|Lonestar)"),
+                          num_work_groups = str_extract_all(result_text, "((?<=NUM WORK GROUPS: )\\d+|Lonestar)")
+                          ) %>%
   map(~.x %>% flatten() %>% unlist()) %>% 
   tibble::as_tibble() %>%
   dplyr::mutate(time_in_ms = time_in_ms %>% dplyr::na_if("NA") %>% as.numeric(),
                 time_in_ns = time_in_ns %>% dplyr::na_if("NA") %>% as.numeric(),
+                num_work_groups = num_work_groups %>% dplyr::na_if("Lonestar") %>% as.numeric(),
                 device = devices[as.numeric(device) + 1],
                 graph = result_text %>%
                   str_extract("(?<=INPUTGRAPH ).*(?=\\.gr(\n|\r))") %>%
