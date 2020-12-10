@@ -18,13 +18,18 @@ results <- tibble::tibble(device = str_extract_all(result_text, "(?<=Device )\\d
                           time_in_ms = str_extract_all(result_text, "(?<=Total time: )(\\d+|[nN][aA])(?= ms)"),
                           time_in_ns = str_extract_all(result_text, "(?<=Total time: )(\\d+|[nN][aA])(?= ns)"),
                           method = str_extract_all(result_text, "(SYCL Data-Driven|SYCL Topology-Driven|Lonestar)"),
-                          num_work_groups = str_extract_all(result_text, "((?<=NUM WORK GROUPS: )\\d+|Lonestar)")
+                          num_work_groups = str_extract_all(result_text, "((?<=NUM WORK GROUPS: )\\d+|Lonestar)"),
+                          num_reruns = str_extract_all(result_text, "((?<=NUM KERNEL RERUNS: )\\d+|Lonestar|Topology-Driven)")
                           ) %>%
   map(~.x %>% flatten() %>% unlist()) %>% 
   tibble::as_tibble() %>%
   dplyr::mutate(time_in_ms = time_in_ms %>% dplyr::na_if("NA") %>% as.numeric(),
                 time_in_ns = time_in_ns %>% dplyr::na_if("NA") %>% as.numeric(),
                 num_work_groups = num_work_groups %>% dplyr::na_if("Lonestar") %>% as.numeric(),
+                num_reruns = num_reruns %>% 
+                      dplyr::na_if("Lonestar") %>%
+                      dplyr::na_if("Topology-Driven") %>% 
+                      as.numeric(),
                 device = devices[as.numeric(device) + 1],
                 graph = result_text %>%
                   str_extract("(?<=INPUTGRAPH ).*(?=\\.gr(\n|\r))") %>%
